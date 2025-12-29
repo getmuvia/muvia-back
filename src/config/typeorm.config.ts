@@ -22,5 +22,8 @@ export const typeOrmConfig = async (
         ssl: isProduction ? { rejectUnauthorized: false } : false,
 
         logging: !isProduction,
+
+        uuidExtension: 'pgcrypto',
     };
 };
+
