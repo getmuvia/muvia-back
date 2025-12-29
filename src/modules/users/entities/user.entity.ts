@@ -5,9 +5,11 @@ import {
   CreateDateColumn,
   UpdateDateColumn,
   OneToOne,
+  OneToMany,
 } from 'typeorm';
 import { VendorProfile } from './vendor-profile.entity';
 import { UserRole } from '../interfaces/user-role';
+import { Product } from '../../products/entities/product.entity';
 
 @Entity('users')
 export class User {
@@ -32,5 +34,6 @@ export class User {
   @OneToOne(() => VendorProfile, (profile) => profile.user, { cascade: true })
   vendorProfile: VendorProfile;
 
-  // Products relation will be added in Phase 4
+  @OneToMany(() => Product, (product) => product.seller)
+  products: Product[];
 }
