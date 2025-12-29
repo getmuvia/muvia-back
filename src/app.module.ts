@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { APP_FILTER } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './modules/auth/auth.module';
@@ -11,6 +12,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { typeOrmConfig } from './config/typeorm.config';
 import { envValidationSchema } from './config/env.validation';
+import { CommonModule } from './common/common.module';
+import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 @Module({
   imports: [
@@ -23,8 +26,20 @@ import { envValidationSchema } from './config/env.validation';
       inject: [ConfigService],
       useFactory: typeOrmConfig,
     }),
-    AuthModule, UsersModule, ProductsModule, CategoriesModule],
+    CommonModule,
+    AuthModule,
+    UsersModule,
+    ProductsModule,
+    CategoriesModule,
+  ],
   controllers: [AppController, FilesController],
-  providers: [AppService, FilesService],
+  providers: [
+    AppService,
+    FilesService,
+    {
+      provide: APP_FILTER,
+      useClass: HttpExceptionFilter,
+    },
+  ],
 })
-export class AppModule {}
+export class AppModule { }

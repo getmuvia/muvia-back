@@ -1,27 +1,44 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToOne, JoinColumn } from 'typeorm';
+import {
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  OneToOne,
+  JoinColumn,
+} from 'typeorm';
 import { User } from './user.entity';
 
-@Entity()
+export interface BusinessHours {
+  [day: string]: {
+    open: string;
+    close: string;
+    isClosed?: boolean;
+  };
+}
+
+@Entity('vendor_profiles')
 export class VendorProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
 
+  @Column({ name: 'user_id' })
+  userId: string;
+
   @Column()
   businessName: string;
 
-  @Column('text')
+  @Column('text', { nullable: true })
   description: string;
 
   @Column({ nullable: true })
   logoUrl: string;
 
   @Column({ type: 'jsonb', nullable: true })
-  businessHours: any; 
+  businessHours: BusinessHours;
 
   @Column({ default: false })
   isVerified: boolean;
 
   @OneToOne(() => User, (user) => user.vendorProfile, { onDelete: 'CASCADE' })
-  @JoinColumn()
+  @JoinColumn({ name: 'user_id' })
   user: User;
 }
