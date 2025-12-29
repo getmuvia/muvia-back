@@ -1,26 +1,156 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
+import { User } from './entities/user.entity';
+import { VendorProfile } from './entities/vendor-profile.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { PasswordService } from '../../common/services/password.service';
+import { UserRole } from './interfaces/user-role';
 
 @Injectable()
 export class UsersService {
-  create(createUserDto: CreateUserDto) {
-    return 'This action adds a new user';
+  constructor(
+    @InjectRepository(User)
+    private readonly userRepository: Repository<User>,
+    @InjectRepository(VendorProfile)
+    private readonly vendorProfileRepository: Repository<VendorProfile>,
+    private readonly passwordService: PasswordService,
+  ) { }
+
+  async create(createUserDto: CreateUserDto): Promise<User> {
+    await this.validateEmailNotExists(createUserDto.email);
+    this.validateVendorProfile(createUserDto);
+
+    const passwordHash = await this.passwordService.hash(createUserDto.password);
+
+    const user = this.userRepository.create({
+      email: createUserDto.email,
+      passwordHash,
+      role: createUserDto.role,
+    });
+
+    const savedUser = await this.userRepository.save(user);
+
+    if (this.isVendor(createUserDto.role) && createUserDto.vendorProfile) {
+      await this.createVendorProfile(savedUser.id, createUserDto.vendorProfile);
+    }
+
+    return this.findOne(savedUser.id);
   }
 
-  findAll() {
-    return `This action returns all users`;
+  async createVendor(createUserDto: CreateUserDto): Promise<User> {
+    if (createUserDto.role !== UserRole.VENDOR) {
+      throw new BadRequestException('Role must be vendor to create a vendor account');
+    }
+
+    if (!createUserDto.vendorProfile) {
+      throw new BadRequestException('Vendor profile is required for vendor accounts');
+    }
+
+    return this.create(createUserDto);
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} user`;
+  async createConsumer(createUserDto: Omit<CreateUserDto, 'vendorProfile'>): Promise<User> {
+    return this.create({
+      ...createUserDto,
+      role: UserRole.CONSUMER,
+    });
   }
 
-  update(id: number, updateUserDto: UpdateUserDto) {
-    return `This action updates a #${id} user`;
+  async findOneByEmail(email: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { email },
+      select: ['id', 'email', 'passwordHash', 'role'],
+    });
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} user`;
+  async findOneByEmailWithProfile(email: string): Promise<User | null> {
+    return this.userRepository.findOne({
+      where: { email },
+      select: ['id', 'email', 'passwordHash', 'role'],
+      relations: ['vendorProfile'],
+    });
+  }
+
+  async findOne(id: string): Promise<User> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      relations: ['vendorProfile'],
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    return user;
+  }
+
+  async findAll(): Promise<User[]> {
+    return this.userRepository.find({
+      relations: ['vendorProfile'],
+    });
+  }
+
+  async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    const user = await this.findOne(id);
+
+    if (updateUserDto.password) {
+      user.passwordHash = await this.passwordService.hash(updateUserDto.password);
+    }
+
+    if (updateUserDto.vendorProfile && this.isVendor(user.role)) {
+      await this.updateVendorProfile(user.id, updateUserDto.vendorProfile);
+    }
+
+    await this.userRepository.save(user);
+    return this.findOne(id);
+  }
+
+  async remove(id: string): Promise<void> {
+    const user = await this.findOne(id);
+    await this.userRepository.remove(user);
+  }
+
+  private async validateEmailNotExists(email: string): Promise<void> {
+    const existingUser = await this.userRepository.findOne({ where: { email } });
+    if (existingUser) {
+      throw new ConflictException('Email has already been registered');
+    }
+  }
+
+  private validateVendorProfile(dto: CreateUserDto): void {
+    if (this.isVendor(dto.role) && !dto.vendorProfile) {
+      throw new BadRequestException('Vendor profile is required for vendor accounts');
+    }
+  }
+
+  private isVendor(role: UserRole): boolean {
+    return role === UserRole.VENDOR;
+  }
+
+  private async createVendorProfile(
+    userId: string,
+    profileData: CreateUserDto['vendorProfile'],
+  ): Promise<VendorProfile> {
+    const vendorProfile = this.vendorProfileRepository.create({
+      userId,
+      ...profileData,
+    });
+    return this.vendorProfileRepository.save(vendorProfile);
+  }
+
+  private async updateVendorProfile(
+    userId: string,
+    profileData: UpdateUserDto['vendorProfile'],
+  ): Promise<void> {
+    if (profileData) {
+      await this.vendorProfileRepository.update({ userId }, profileData);
+    }
   }
 }
