@@ -6,8 +6,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { ProductsModule } from './modules/products/products.module';
 import { CategoriesModule } from './modules/categories/categories.module';
-import { FilesController } from './modules/files/files.controller';
-import { FilesService } from './modules/files/files.service';
+import { FilesModule } from './modules/files/files.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { typeOrmConfig } from './config/typeorm.config';
@@ -31,11 +30,11 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     UsersModule,
     ProductsModule,
     CategoriesModule,
+    FilesModule,
   ],
-  controllers: [AppController, FilesController],
+  controllers: [AppController],
   providers: [
     AppService,
-    FilesService,
     {
       provide: APP_FILTER,
       useClass: HttpExceptionFilter,
@@ -43,3 +42,4 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
   ],
 })
 export class AppModule { }
+
