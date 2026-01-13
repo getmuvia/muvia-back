@@ -2,7 +2,7 @@ import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus } from '@n
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
 import { CreateUserDto } from '../users/dto/create-user.dto';
-import { AuthResponseDto } from './dto/auth-response.dto';
+import { AuthResponseDto, UserPayload } from './dto/auth-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -19,6 +19,12 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
     return this.authService.login(loginDto);
+  }
+
+  @Get('check-status')
+  @UseGuards(JwtAuthGuard)
+  checkStatus(@CurrentUser() user: UserPayload) {
+    return this.authService.checkStatus(user);
   }
 
   @Get('profile')

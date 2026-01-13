@@ -1,10 +1,12 @@
 import { UserRole } from '../../users/interfaces/user-role';
 
+export class UserPayload {
+    id: string;
+    email: string;
+    role: UserRole;
+}
+
 export class AuthResponseDto {
     accessToken: string;
-    user: {
-        id: string;
-        email: string;
-        role: UserRole;
-    };
+    user: UserPayload;
 }
