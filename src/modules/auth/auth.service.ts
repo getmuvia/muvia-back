@@ -12,6 +12,8 @@ import { AuthResponseDto } from './dto/auth-response.dto';
 import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { User } from '../users/entities/user.entity';
 
+import { UserPayload } from './dto/auth-response.dto';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -54,7 +56,12 @@ export class AuthService {
     return user;
   }
 
-  private generateAuthResponse(user: User): AuthResponseDto {
+
+  async checkStatus(user: UserPayload): Promise<AuthResponseDto> {
+    return this.generateAuthResponse(user);
+  }
+
+  private generateAuthResponse(user: UserPayload): AuthResponseDto {
     const payload: JwtPayload = {
       sub: user.id,
       email: user.email,
