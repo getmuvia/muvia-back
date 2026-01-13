@@ -3,7 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { FilesController } from './files.controller';
 import { FilesService } from './files.service';
 import { STORAGE_PROVIDER } from './interfaces/storage-provider.interface';
-import { AzureBlobStorageProvider } from './providers/azure-blob.provider';
+import { LocalStorageProvider } from './providers/local-storage.provider';
 
 @Module({
     imports: [ConfigModule],
@@ -12,7 +12,7 @@ import { AzureBlobStorageProvider } from './providers/azure-blob.provider';
         FilesService,
         {
             provide: STORAGE_PROVIDER,
-            useClass: AzureBlobStorageProvider,
+            useClass: LocalStorageProvider,
         },
     ],
     exports: [FilesService],
