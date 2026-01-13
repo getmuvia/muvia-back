@@ -2,28 +2,33 @@ import { ConfigService } from '@nestjs/config';
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
 export const typeOrmConfig = async (
-    configService: ConfigService,
+  configService: ConfigService,
 ): Promise<TypeOrmModuleOptions> => {
-    const isProduction = configService.get<string>('NODE_ENV') === 'production';
+  const isProduction = configService.get<string>('NODE_ENV') === 'production';
+  const host = configService.get<string>('DB_HOST');
+  
+  const isGoogleCloudSocket = host?.startsWith('/');
 
-    return {
-        type: 'postgres',
+  return {
+    type: 'postgres',
+    host: host,
 
-        host: configService.get<string>('DB_HOST'),
-        port: configService.get<number>('DB_PORT'),
-        username: configService.get<string>('DB_USERNAME'),
-        password: configService.get<string>('DB_PASSWORD'),
-        database: configService.get<string>('DB_NAME'),
+    port: parseInt(configService.get<string>('DB_PORT') || '5432', 10),
+    username: configService.get<string>('DB_USERNAME'),
+    password: configService.get<string>('DB_PASSWORD'),
+    database: configService.get<string>('DB_NAME'),
 
-        autoLoadEntities: true,
+    autoLoadEntities: true,
 
-        synchronize: !isProduction,
+    synchronize: !isProduction, 
 
-        ssl: isProduction ? { rejectUnauthorized: false } : false,
+    ssl: isProduction && !isGoogleCloudSocket ? { rejectUnauthorized: false } : false,
+    
+    extra: isGoogleCloudSocket ? {
+        socketPath: host
+    } : undefined,
 
-        logging: !isProduction,
-
-        uuidExtension: 'pgcrypto',
-    };
+    logging: !isProduction,
+    uuidExtension: 'pgcrypto',
+  };
 };
-
