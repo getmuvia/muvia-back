@@ -2,10 +2,10 @@ import { PartialType, OmitType } from '@nestjs/mapped-types';
 import { CreateUserDto } from './create-user.dto';
 import { IsOptional, IsString, MinLength, Matches, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateVendorProfileDto } from './create-vendor-profile.dto';
+import { UpdateVendorProfileDto } from './update-vendor-profile.dto';
 
 export class UpdateUserDto extends PartialType(
-    OmitType(CreateUserDto, ['email', 'role', 'password'] as const),
+    OmitType(CreateUserDto, ['email', 'role', 'password', 'vendorProfile'] as const),
 ) {
     @IsOptional()
     @IsString()
@@ -18,6 +18,6 @@ export class UpdateUserDto extends PartialType(
 
     @IsOptional()
     @ValidateNested()
-    @Type(() => CreateVendorProfileDto)
-    vendorProfile?: CreateVendorProfileDto;
+    @Type(() => UpdateVendorProfileDto)
+    vendorProfile?: UpdateVendorProfileDto;
 }
