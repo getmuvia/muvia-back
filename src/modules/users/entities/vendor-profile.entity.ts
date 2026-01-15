@@ -15,6 +15,12 @@ export interface BusinessHours {
   };
 }
 
+export interface SocialLink {
+  name: string;
+  url: string;
+  icon: string;
+}
+
 @Entity('vendor_profiles')
 export class VendorProfile {
   @PrimaryGeneratedColumn('uuid')
@@ -31,6 +37,15 @@ export class VendorProfile {
 
   @Column({ nullable: true })
   logoUrl: string;
+
+  @Column({ nullable: true })
+  coverImage: string;
+
+  @Column({ length: 150, nullable: true })
+  aboutMe: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  socialLinks: SocialLink[];
 
   @Column({ type: 'jsonb', nullable: true })
   businessHours: BusinessHours;
