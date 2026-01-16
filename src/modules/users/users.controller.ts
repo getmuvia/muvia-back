@@ -12,11 +12,13 @@ import {
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from './interfaces/user-role';
+import { Public } from '../../common/decorators/public.decorator';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -60,9 +62,20 @@ export class UsersController {
     return this.usersService.update(user.id, updateUserDto);
   }
 
+  @Patch('me/password')
+  changePassword(@CurrentUser() user: any, @Body() changePasswordDto: ChangePasswordDto) {
+    return this.usersService.changePassword(user.id, changePasswordDto);
+  }
+
   @Delete(':id')
   @Roles(UserRole.ADMIN)
   remove(@Param('id', ParseUUIDPipe) id: string) {
     return this.usersService.remove(id);
+  }
+
+  @Get('vendor/:id')
+  @Public()
+  findOnePublic(@Param('id', ParseUUIDPipe) id: string) {
+    return this.usersService.findOnePublic(id);
   }
 }
