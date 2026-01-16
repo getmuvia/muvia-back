@@ -3,6 +3,7 @@ import {
   ConflictException,
   NotFoundException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -10,6 +11,7 @@ import { User } from './entities/user.entity';
 import { VendorProfile } from './entities/vendor-profile.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 import { PasswordService } from '../../common/services/password.service';
 import { UserRole } from './interfaces/user-role';
 
@@ -97,12 +99,22 @@ export class UsersService {
     });
   }
 
+  async findOnePublic(id: string): Promise<User> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      relations: ['vendorProfile'],
+      select: ['id', 'role', 'createdAt', 'vendorProfile'], // Explicitly select safe fields
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    return user;
+  }
+
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
     const user = await this.findOne(id);
-
-    if (updateUserDto.password) {
-      user.passwordHash = await this.passwordService.hash(updateUserDto.password);
-    }
 
     if (updateUserDto.vendorProfile && this.isVendor(user.role)) {
       await this.updateVendorProfile(user.id, updateUserDto.vendorProfile);
@@ -110,6 +122,29 @@ export class UsersService {
 
     await this.userRepository.save(user);
     return this.findOne(id);
+  }
+
+  async changePassword(id: string, changePasswordDto: ChangePasswordDto): Promise<void> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      select: ['id', 'passwordHash'], // Explicitly select passwordHash
+    });
+
+    if (!user) {
+      throw new NotFoundException(`User with ID ${id} not found`);
+    }
+
+    const isPasswordValid = await this.passwordService.compare(
+      changePasswordDto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Invalid current password');
+    }
+
+    user.passwordHash = await this.passwordService.hash(changePasswordDto.newPassword);
+    await this.userRepository.save(user);
   }
 
   async remove(id: string): Promise<void> {
