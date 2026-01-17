@@ -21,6 +21,43 @@ class BusinessHoursItemDto {
     isClosed?: boolean;
 }
 
+export class BusinessHoursDto {
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    monday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    tuesday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    wednesday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    thursday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    friday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    saturday?: BusinessHoursItemDto;
+
+    @IsOptional()
+    @ValidateNested()
+    @Type(() => BusinessHoursItemDto)
+    sunday?: BusinessHoursItemDto;
+}
+
 export class CreateVendorProfileDto {
     @IsString()
     @IsNotEmpty({ message: 'Business name is required' })
@@ -36,7 +73,7 @@ export class CreateVendorProfileDto {
 
     @IsObject()
     @IsOptional()
-    @ValidateNested({ each: true })
-    @Type(() => BusinessHoursItemDto)
-    businessHours?: Record<string, BusinessHoursItemDto>;
+    @ValidateNested()
+    @Type(() => BusinessHoursDto)
+    businessHours?: BusinessHoursDto;
 }

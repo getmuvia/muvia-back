@@ -7,13 +7,7 @@ import {
 } from 'typeorm';
 import { User } from './user.entity';
 
-export interface BusinessHours {
-  [day: string]: {
-    open: string;
-    close: string;
-    isClosed?: boolean;
-  };
-}
+import { BusinessHoursDto } from '../dto/create-vendor-profile.dto';
 
 export interface SocialLink {
   name: string;
@@ -48,7 +42,7 @@ export class VendorProfile {
   socialLinks: SocialLink[];
 
   @Column({ type: 'jsonb', nullable: true })
-  businessHours: BusinessHours;
+  businessHours: BusinessHoursDto;
 
   @Column({ default: false })
   isVerified: boolean;
