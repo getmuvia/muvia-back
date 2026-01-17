@@ -48,15 +48,6 @@ export class UsersController {
     return this.usersService.findOne(id);
   }
 
-  @Patch(':id')
-  @Roles(UserRole.ADMIN)
-  update(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updateUserDto: UpdateUserDto,
-  ) {
-    return this.usersService.update(id, updateUserDto);
-  }
-
   @Patch('me')
   updateMe(@CurrentUser() user: any, @Body() updateUserDto: UpdateUserDto) {
     return this.usersService.update(user.id, updateUserDto);
@@ -65,6 +56,15 @@ export class UsersController {
   @Patch('me/password')
   changePassword(@CurrentUser() user: any, @Body() changePasswordDto: ChangePasswordDto) {
     return this.usersService.changePassword(user.id, changePasswordDto);
+  }
+
+  @Patch(':id')
+  @Roles(UserRole.ADMIN)
+  update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
+    return this.usersService.update(id, updateUserDto);
   }
 
   @Delete(':id')
