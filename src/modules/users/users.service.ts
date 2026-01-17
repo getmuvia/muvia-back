@@ -114,10 +114,22 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
+    if (Object.keys(updateUserDto).length === 0) {
+      throw new BadRequestException('At least one field must be provided for update');
+    }
+
     const user = await this.findOne(id);
 
-    if (updateUserDto.vendorProfile && this.isVendor(user.role)) {
-      await this.updateVendorProfile(user.id, updateUserDto.vendorProfile);
+    const { vendorProfile, ...userData } = updateUserDto;
+    this.userRepository.merge(user, userData);
+
+    if (vendorProfile && this.isVendor(user.role)) {
+      if (!user.vendorProfile) {
+
+        user.vendorProfile = this.vendorProfileRepository.create({ userId: user.id, ...vendorProfile });
+      } else {
+        this.vendorProfileRepository.merge(user.vendorProfile, vendorProfile);
+      }
     }
 
     await this.userRepository.save(user);
