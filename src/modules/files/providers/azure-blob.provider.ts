@@ -52,4 +52,8 @@ export class AzureBlobStorageProvider implements StorageProvider {
     async getSignedUrl(fileKey: string): Promise<string> {
         return this.containerClient.getBlockBlobClient(fileKey).url;
     }
+
+    async getUploadSignedUrl(filename: string, contentType: string, folder?: string): Promise<{ url: string; key: string }> {
+        throw new Error('Method not implemented.');
+    }
 }
