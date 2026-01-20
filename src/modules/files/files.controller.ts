@@ -20,7 +20,6 @@ export class FilesController {
     constructor(private readonly filesService: FilesService) { }
 
     /**
-     * Paso 1 del Frontend: Pedir permiso para subir
      * POST /files/upload-url
      * Body: { "filename": "foto.jpg", "contentType": "image/jpeg" }
      */
