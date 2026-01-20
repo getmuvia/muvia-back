@@ -5,3 +5,11 @@ export class UploadFileDto {
     @IsOptional()
     folder?: string;
 }
+
+export class InitUploadDto {
+    @IsString()
+    filename: string;
+    
+    @IsString()
+    contentType: string;
+}
