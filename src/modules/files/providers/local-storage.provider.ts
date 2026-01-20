@@ -63,4 +63,8 @@ export class LocalStorageProvider implements StorageProvider {
     async getSignedUrl(fileKey: string): Promise<string> {
         return `/uploads/${fileKey}`;
     }
+
+    async getUploadSignedUrl(filename: string, contentType: string, folder?: string): Promise<{ url: string; key: string }> {
+        throw new Error('Method not implemented.');
+    }
 }
