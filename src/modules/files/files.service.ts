@@ -53,4 +53,9 @@ export class FilesService {
     ): Promise<string> {
         return this.storageProvider.getSignedUrl(fileKey, expiresInSeconds);
     }
+
+    async generateUploadUrl(filename: string, contentType: string, folder?: string) {
+        this.logger.log(`Generating upload URL for: ${filename}`);
+        return this.storageProvider.getUploadSignedUrl(filename, contentType, folder);
+    }
 }

@@ -1,8 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Storage, Bucket } from '@google-cloud/storage';
 import { v4 as uuidv4 } from 'uuid';
 import type { StorageProvider, UploadOptions, UploadResult } from '../interfaces/storage-provider.interface';
+
+const ALLOWED_MIME_TYPES = [
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+
+    'model/gltf-binary',
+    'model/gltf+json',
+    'model/vnd.usdz+zip'
+];
 
 @Injectable()
 export class GoogleCloudStorageProvider implements StorageProvider {
@@ -70,8 +80,37 @@ export class GoogleCloudStorageProvider implements StorageProvider {
         });
         return url;
     }
-    
+
     getGsUri(fileKey: string): string {
         return `gs://${this.bucketName}/${fileKey}`;
+    }
+
+    // --- Signed URL new method ---
+    async getUploadSignedUrl(filename: string, contentType: string, folder?: string): Promise<{ url: string; key: string }> {
+
+        if (!ALLOWED_MIME_TYPES.includes(contentType)) {
+            this.logger.warn(`Upload blocked: ${contentType}`);
+            throw new BadRequestException(`File type not allowed.`);
+        }
+
+        const extension = filename.split('.').pop() || '';
+        const uniqueFilename = `${uuidv4()}.${extension}`;
+        const filePath = folder ? `${folder}/${uniqueFilename}` : uniqueFilename;
+
+        const fileRef = this.bucket.file(filePath);
+
+        const [url] = await fileRef.getSignedUrl({
+            version: 'v4',
+            action: 'write',
+            expires: Date.now() + 15 * 60 * 1000,
+            contentType: contentType,
+        });
+
+        this.logger.log(`Generated upload Signed URL for: ${filePath}`);
+
+        return {
+            url,
+            key: filePath
+        };
     }
 }

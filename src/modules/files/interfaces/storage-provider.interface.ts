@@ -59,6 +59,13 @@ export interface StorageProvider {
      * @returns Promise with signed URL
      */
     getSignedUrl(fileKey: string, expiresInSeconds?: number): Promise<string>;
+
+    // New method, returns a signed URL for uploading files
+    getUploadSignedUrl(
+        filename: string, 
+        contentType: string, 
+        folder?: string
+    ): Promise<{ url: string; key: string }>;
 }
 
 /**
