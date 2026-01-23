@@ -35,7 +35,7 @@ export class VectorService implements OnModuleInit {
         try {
             const result = await this.model.embedContent({
                 content: { role: 'user', parts: [{ text: cleanText }] },
-                taskType: taskType, 
+                taskType: taskType,
                 title: taskType === 'RETRIEVAL_DOCUMENT' ? 'Product Description' : undefined
             });
 
@@ -69,6 +69,15 @@ export class VectorService implements OnModuleInit {
         try {
             const vertexAI = new VertexAI({ project: projectId, location });
             this.model = vertexAI.getGenerativeModel({ model: this.EMBEDDING_MODEL });
+
+            // Todo: Delete
+            this.logger.warn(`🔍 DIAGNÓSTICO MODELO:`);
+            this.logger.warn(`Tipo de objeto: ${this.model?.constructor?.name}`);
+            // Imprimir las funciones disponibles en el modelo
+            const metodos = Object.getOwnPropertyNames(Object.getPrototypeOf(this.model));
+            this.logger.warn(`Métodos disponibles: ${metodos.join(', ')}`);
+            //---------
+            
             this.initialized = true;
             this.logger.log(`✅ VectorService initialized with model ${this.EMBEDDING_MODEL}`);
         } catch (err) {
