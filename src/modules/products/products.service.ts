@@ -153,8 +153,8 @@ export class ProductsService {
    * Triggers async embedding generation without blocking.
    */
   private triggerEmbeddingGeneration(productId: string): void {
-    this.embeddingService.updateForProduct(productId).catch(() => {
-      // Silently fail - embedding is non-critical
+    this.embeddingService.updateForProduct(productId).catch((error) => {
+      console.error(`❌ Embedding generation failed for product ${productId}:`, error.message);
     });
   }
 
