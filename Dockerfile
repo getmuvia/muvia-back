@@ -4,7 +4,9 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci
+RUN npm install
+
+RUN npm list @google-cloud/vertexai
 
 COPY . .
 
