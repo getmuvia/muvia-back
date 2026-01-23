@@ -13,5 +13,9 @@ export const envValidationSchema = Joi.object({
 
   JWT_SECRET: Joi.string().required(),
   JWT_EXPIRATION: Joi.string().default('24h'),
+
+  // Google Cloud Platform - Vertex AI
+  GCP_PROJECT_ID: Joi.string().optional(),
+  GCP_LOCATION: Joi.string().default('us-central1'),
 });
 
