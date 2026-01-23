@@ -36,9 +36,13 @@ export class ProductVectorRepository {
 
     /**
      * Updates the embedding vector for a specific product.
+     * Uses raw SQL to properly cast string to pgvector type.
      */
     async updateEmbedding(productId: string, embedding: string): Promise<void> {
-        await this.repository.update(productId, { embedding });
+        await this.repository.query(
+            `UPDATE products SET embedding = $1::vector WHERE id = $2`,
+            [embedding, productId],
+        );
     }
 
     /**
