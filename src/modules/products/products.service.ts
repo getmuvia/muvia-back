@@ -29,7 +29,13 @@ export class ProductsService {
     const product = this.productRepository.create({ ...productData, sellerId });
     const savedProduct = await this.productRepository.save(product);
 
-    this.triggerEmbeddingGeneration(savedProduct.id);
+    try {
+      console.log(`🧠 Generando embedding para producto ${savedProduct.id}...`);
+      await this.triggerEmbeddingGeneration(savedProduct.id); 
+      console.log(`✅ Embedding generado correctamente.`);
+  } catch (error) {
+      console.error(`❌ Falló la IA, pero el producto se guardó:`, error);
+  }
 
     if (assets?.length) {
       await this.createAssets(savedProduct.id, assets);
@@ -152,10 +158,8 @@ export class ProductsService {
   /**
    * Triggers async embedding generation without blocking.
    */
-  private triggerEmbeddingGeneration(productId: string): void {
-    this.embeddingService.updateForProduct(productId).catch((error) => {
-      console.error(`❌ Embedding generation failed for product ${productId}:`, error.message);
-    });
+  private async triggerEmbeddingGeneration(productId: string): Promise<void> {
+    await this.embeddingService.updateForProduct(productId);
   }
 
   private shouldRegenerateEmbedding(dto: UpdateProductDto): boolean {
