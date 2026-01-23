@@ -13,6 +13,7 @@ import { typeOrmConfig } from './config/typeorm.config';
 import { envValidationSchema } from './config/env.validation';
 import { CommonModule } from './common/common.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
+import { AiModule } from './modules/ai/ai.module';
 
 @Module({
   imports: [
@@ -31,6 +32,7 @@ import { HttpExceptionFilter } from './common/filters/http-exception.filter';
     ProductsModule,
     CategoriesModule,
     FilesModule,
+    AiModule,
   ],
   controllers: [AppController],
   providers: [

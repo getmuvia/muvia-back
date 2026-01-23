@@ -4,13 +4,14 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like, Between, ArrayContains, In } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
+import { EmbeddingService } from '../ai/services/embedding/embedding.service';
 
 @Injectable()
 export class ProductsService {
@@ -19,19 +20,18 @@ export class ProductsService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(ProductAsset)
     private readonly assetRepository: Repository<ProductAsset>,
+    private readonly embeddingService: EmbeddingService,
   ) { }
 
-  async create(sellerId: string, createProductDto: CreateProductDto): Promise<Product> {
-    const { assets, ...productData } = createProductDto;
+  async create(sellerId: string, dto: CreateProductDto): Promise<Product> {
+    const { assets, ...productData } = dto;
 
-    const product = this.productRepository.create({
-      ...productData,
-      sellerId,
-    });
-
+    const product = this.productRepository.create({ ...productData, sellerId });
     const savedProduct = await this.productRepository.save(product);
 
-    if (assets && assets.length > 0) {
+    this.triggerEmbeddingGeneration(savedProduct.id);
+
+    if (assets?.length) {
       await this.createAssets(savedProduct.id, assets);
     }
 
@@ -42,19 +42,13 @@ export class ProductsService {
     const { page = 1, limit = 20, ...filters } = filterDto;
     const skip = (page - 1) * limit;
 
-    const queryBuilder = this.productRepository
-      .createQueryBuilder('product')
-      .leftJoinAndSelect('product.assets', 'assets')
-      .leftJoinAndSelect('product.category', 'category')
-      .leftJoinAndSelect('product.seller', 'seller');
-
+    const queryBuilder = this.createBaseQuery();
     this.applyFilters(queryBuilder, filters);
 
     queryBuilder.orderBy('product.createdAt', 'DESC');
     queryBuilder.skip(skip).take(limit);
 
     const [data, total] = await queryBuilder.getManyAndCount();
-
     return { data, total };
   }
 
@@ -96,17 +90,16 @@ export class ProductsService {
       .getMany();
   }
 
-  async update(
-    id: string,
-    sellerId: string,
-    updateProductDto: UpdateProductDto,
-  ): Promise<Product> {
+  async update(id: string, sellerId: string, dto: UpdateProductDto): Promise<Product> {
     const product = await this.findOne(id);
-
     this.validateOwnership(product, sellerId);
 
-    Object.assign(product, updateProductDto);
+    Object.assign(product, dto);
     await this.productRepository.save(product);
+
+    if (this.shouldRegenerateEmbedding(dto)) {
+      this.triggerEmbeddingGeneration(id);
+    }
 
     return this.findOne(id);
   }
@@ -125,11 +118,7 @@ export class ProductsService {
     const product = await this.findOne(productId);
     this.validateOwnership(product, sellerId);
 
-    const asset = this.assetRepository.create({
-      ...assetDto,
-      productId,
-    });
-
+    const asset = this.assetRepository.create({ ...assetDto, productId });
     return this.assetRepository.save(asset);
   }
 
@@ -154,6 +143,31 @@ export class ProductsService {
 
     await this.assetRepository.update({ productId }, { isPrimary: false });
     await this.assetRepository.update({ id: assetId, productId }, { isPrimary: true });
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Private Helper Methods
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Triggers async embedding generation without blocking.
+   */
+  private triggerEmbeddingGeneration(productId: string): void {
+    this.embeddingService.updateForProduct(productId).catch(() => {
+      // Silently fail - embedding is non-critical
+    });
+  }
+
+  private shouldRegenerateEmbedding(dto: UpdateProductDto): boolean {
+    return !!(dto.title || dto.description || dto.keywords);
+  }
+
+  private createBaseQuery() {
+    return this.productRepository
+      .createQueryBuilder('product')
+      .leftJoinAndSelect('product.assets', 'assets')
+      .leftJoinAndSelect('product.category', 'category')
+      .leftJoinAndSelect('product.seller', 'seller');
   }
 
   private async createAssets(
@@ -185,7 +199,7 @@ export class ProductsService {
       );
     }
 
-    if (filters.keywords && filters.keywords.length > 0) {
+    if (filters.keywords?.length) {
       queryBuilder.andWhere('product.keywords && :keywords', {
         keywords: filters.keywords,
       });
