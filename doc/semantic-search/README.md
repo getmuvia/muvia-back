@@ -112,7 +112,7 @@ src/modules/ai/
 |--------|--------|---------------|
 | **Provider** | Google Cloud Vertex AI | Consistent with existing GCP infrastructure (Cloud Run, Cloud SQL) |
 | **Model** | `text-embedding-004` | State-of-the-art multilingual embedding model with 768 dimensions |
-| **SDK** | `@google-cloud/vertexai` | Official Google Cloud SDK for Node.js |
+| **SDK** | `@google-cloud/aiplatform` | Official low-level Google Cloud AI Platform SDK for Node.js |
 
 **Why Vertex AI over alternatives?**
 
@@ -145,17 +145,24 @@ src/modules/ai/
 ### Service Responsibilities
 
 #### VectorService
-Low-level Vertex AI client:
-- Connecting to Vertex AI
-- Generating embeddings from text
+Low-level Vertex AI client using `PredictionServiceClient` from `@google-cloud/aiplatform`:
+- Connecting to Vertex AI via regional API endpoint
+- Generating embeddings with configurable task types
+- Using `helpers.toValue()` and `helpers.fromValue()` for Protobuf conversion
 - Text sanitization
 
 ```typescript
 // vector.service.ts
-async generateEmbedding(text: string): Promise<number[]>
+type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
+
+async generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<number[]>
 toVectorString(embedding: number[]): string
 isAvailable(): boolean
 ```
+
+> **Task Types:**
+> - `RETRIEVAL_DOCUMENT`: Used when generating embeddings for products (stored in DB)
+> - `RETRIEVAL_QUERY`: Used when generating embeddings for search queries
 
 #### ProductVectorRepository
 Encapsulates all pgvector SQL queries:
@@ -183,12 +190,16 @@ async regenerateAll(): Promise<{ updated: number; failed: number }>
 
 #### SearchService
 Orchestrates semantic search:
-- Batch query processing
-- Error isolation per query
+- Batch query processing with parallel execution
+- Uses `RETRIEVAL_QUERY` task type for query embeddings
+- Error isolation per query (failed queries return empty results)
 
 ```typescript
 // search.service.ts
-async searchBatch(dto: SearchQueryDto): Promise<SearchResult[]>
+async searchBatch(dto: SearchQueryDto): Promise<SearchResult[]>  // Parallel processing
+private async searchOne(query, limit, threshold): Promise<SearchResult>  // Single query
+private async findSimilarProducts(query, limit, threshold): Promise<SearchProductResult[]>
+private async createQueryEmbedding(query): Promise<string>  // Uses 'RETRIEVAL_QUERY'
 ```
 
 ### Embedding Generation
