@@ -83,11 +83,15 @@ export class VectorService implements OnModuleInit {
     }
 
     private buildPredictionInstance(text: string, taskType: EmbeddingTaskType) {
-        const instance = {
+        const instance: Record<string, any> = {
             content: text,
-            task_type: taskType,
-            title: taskType === 'RETRIEVAL_DOCUMENT' ? 'Product Description' : undefined
+            task_type: taskType    
         };
+
+        if (taskType === 'RETRIEVAL_DOCUMENT') {
+            instance.title = 'Product Description';
+        }
+
         return helpers.toValue(instance);
     }
 
