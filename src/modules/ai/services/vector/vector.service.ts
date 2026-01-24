@@ -1,15 +1,17 @@
 import { Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { VertexAI, GenerativeModel } from '@google-cloud/vertexai';
+import { PredictionServiceClient, helpers, protos } from '@google-cloud/aiplatform';
 
 export type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
 
 @Injectable()
 export class VectorService implements OnModuleInit {
     private readonly logger = new Logger(VectorService.name);
-    private model: any;
+    private client: PredictionServiceClient;
     private initialized = false;
 
+    private projectId: string;
+    private location: string;
     private readonly EMBEDDING_MODEL = 'text-embedding-004';
     private readonly DEFAULT_LOCATION = 'us-central1';
 
@@ -23,77 +25,96 @@ export class VectorService implements OnModuleInit {
         return this.initialized;
     }
 
-    /**
-     * Genera un embedding.
-     * IMPORTANTE: Usa 'RETRIEVAL_DOCUMENT' cuando guardes en BD (hidratación).
-     * Usa 'RETRIEVAL_QUERY' cuando el usuario busque en el frontend.
-     */
     async generateEmbedding(text: string, taskType: EmbeddingTaskType = 'RETRIEVAL_DOCUMENT'): Promise<number[]> {
         this.ensureInitialized();
         const cleanText = this.sanitizeText(text);
 
+        const endpointResourceName = `projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.EMBEDDING_MODEL}`;
+
+        const instanceValue = this.buildPredictionInstance(cleanText, taskType);
+
+        if (!instanceValue) {
+            throw new InternalServerErrorException('Failed to convert input to Protobuf format');
+        }
+
         try {
-            const result = await this.model.embedContent({
-                content: { role: 'user', parts: [{ text: cleanText }] },
-                taskType: taskType,
-                title: taskType === 'RETRIEVAL_DOCUMENT' ? 'Product Description' : undefined
+            const [response] = await this.client.predict({
+                endpoint: endpointResourceName,
+                instances: [instanceValue as any], 
             });
 
-            if (!result.embedding || !result.embedding.values) {
-                throw new Error('Vertex AI returned empty embedding');
-            }
+            return this.extractEmbeddingFromResponse(response);
 
-            return result.embedding.values;
         } catch (error) {
-            this.logger.error(`API call failed for text: "${cleanText.substring(0, 20)}..." - ${error.message}`);
-            throw new InternalServerErrorException(`Embedding failed: ${error.message}`);
+            this.logger.error(`Vertex AI Prediction failed: ${error.message}`);
+            throw new InternalServerErrorException(`Embedding generation failed: ${error.message}`);
         }
     }
 
-    /**
-     * Helper para convertir arrays al formato string de pgvector '[1,2,3]'
-     */
     toVectorString(embedding: number[]): string {
         return JSON.stringify(embedding);
     }
 
-    private initialize(): void {
-        const projectId = this.configService.get<string>('GCP_PROJECT_ID');
-        const location = this.configService.get<string>('GCP_LOCATION') || this.DEFAULT_LOCATION;
+    // ─────────────────────────────────────────────────────────────────────────
+    // Private Helper Methods
+    // ─────────────────────────────────────────────────────────────────────────
 
-        if (!projectId) {
+    private initialize(): void {
+        this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
+        this.location = this.configService.get<string>('GCP_LOCATION') ?? this.DEFAULT_LOCATION;
+
+        if (!this.projectId) {
             this.logger.error('GCP_PROJECT_ID not configured. VectorService disabled.');
             return;
         }
 
         try {
-            const vertexAI = new VertexAI({ project: projectId, location });
-            this.model = vertexAI.getGenerativeModel({ model: this.EMBEDDING_MODEL });
-
-            // Todo: Delete
-            this.logger.warn(`🔍 DIAGNÓSTICO MODELO:`);
-            this.logger.warn(`Tipo de objeto: ${this.model?.constructor?.name}`);
-            // Imprimir las funciones disponibles en el modelo
-            const metodos = Object.getOwnPropertyNames(Object.getPrototypeOf(this.model));
-            this.logger.warn(`Métodos disponibles: ${metodos.join(', ')}`);
-            //---------
+            const apiEndpoint = `${this.location}-aiplatform.googleapis.com`;
             
+            this.client = new PredictionServiceClient({
+                apiEndpoint: apiEndpoint,
+            });
+
             this.initialized = true;
-            this.logger.log(`✅ VectorService initialized with model ${this.EMBEDDING_MODEL}`);
+            this.logger.log(`✅ VectorService initialized (Low-Level Client) on ${this.location}`);
         } catch (err) {
-            this.logger.error(`Failed to initialize Vertex AI: ${err.message}`);
+            this.logger.error(`Failed to initialize PredictionServiceClient: ${err.message}`);
         }
     }
 
+    private buildPredictionInstance(text: string, taskType: EmbeddingTaskType) {
+        const instance = {
+            content: text,
+            task_type: taskType,
+            title: taskType === 'RETRIEVAL_DOCUMENT' ? 'Product Description' : undefined
+        };
+        return helpers.toValue(instance);
+    }
+
+    private extractEmbeddingFromResponse(response: protos.google.cloud.aiplatform.v1.IPredictResponse): number[] {
+        const predictions = response.predictions;
+
+        if (!predictions || predictions.length === 0) {
+            throw new Error('No predictions returned from Vertex AI');
+        }
+
+        const predictionResult = helpers.fromValue(predictions[0] as any) as any;
+
+        if (!predictionResult || !predictionResult.embeddings || !predictionResult.embeddings.values) {
+            throw new Error('Invalid response structure: missing embeddings.values');
+        }
+
+        return predictionResult.embeddings.values as number[];
+    }
+
     private ensureInitialized(): void {
-        if (!this.initialized) {
+        if (!this.initialized || !this.client) {
             throw new InternalServerErrorException('VectorService not ready. Check logs for initialization errors.');
         }
     }
 
     private sanitizeText(text: string): string {
         if (!text) throw new InternalServerErrorException('Cannot embed empty text');
-
         return text.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
     }
 }

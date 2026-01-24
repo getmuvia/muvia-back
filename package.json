@@ -21,6 +21,7 @@
   },
   "dependencies": {
     "@azure/storage-blob": "^12.29.1",
+    "@google-cloud/aiplatform": "^6.1.0",
     "@google-cloud/storage": "^7.18.0",
     "@google-cloud/vertexai": "^1.10.0",
     "@nestjs/common": "^11.0.1",
