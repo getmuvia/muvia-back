@@ -1,6 +1,7 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Product } from '../products/entities/product.entity';
+import { ProductsModule } from '../products/products.module';
 
 // Repository
 import { ProductVectorRepository } from './repositories/product-vector.repository';
@@ -24,7 +25,11 @@ import { EmbeddingController } from './controllers/embedding.controller';
  * - SearchService: Search orchestration (Single Responsibility)
  */
 @Module({
-    imports: [TypeOrmModule.forFeature([Product])],
+    imports: [
+        TypeOrmModule.forFeature([Product]),
+        forwardRef(() => ProductsModule),
+    ],
+
     controllers: [SearchController, EmbeddingController],
     providers: [
         ProductVectorRepository,
