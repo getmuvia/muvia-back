@@ -23,3 +23,25 @@ export interface SearchResult {
     query: string;
     products: SearchProductResult[];
 }
+
+/**
+ * Product result for hybrid search with combined scoring.
+ */
+export interface HybridProductResult {
+    id: string;
+    title: string;
+    description: string | null;
+    price: number;
+    imageUrl: string | null;
+    score: number;
+    matchType: 'semantic' | 'lexical' | 'hybrid';
+}
+
+/**
+ * Response for hybrid search endpoint.
+ */
+export interface HybridSearchResponse {
+    query: string;
+    results: HybridProductResult[];
+    count: number;
+}
