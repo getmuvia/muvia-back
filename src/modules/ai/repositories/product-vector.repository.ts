@@ -78,7 +78,7 @@ export class ProductVectorRepository {
                 (
                     SELECT pa.url 
                     FROM product_assets pa 
-                    WHERE pa.product_id = p.id AND pa.is_primary = true 
+                    WHERE pa.product_id = p.id AND pa."isPrimary" = true 
                     LIMIT 1
                 ) as "imageUrl"
             FROM products p
