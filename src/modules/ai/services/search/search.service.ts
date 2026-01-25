@@ -30,10 +30,6 @@ export class SearchService {
         private readonly productsService: ProductsService,
     ) { }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // Hybrid Search (NEW)
-    // ─────────────────────────────────────────────────────────────────────────
-
     /**
      * Hybrid search: Combines semantic (AI) and lexical (text) search in parallel.
      * Uses a fetch multiplier to ensure the best results aren't missed.
@@ -142,22 +138,54 @@ export class SearchService {
             .sort((a, b) => b.score - a.score);
     }
 
+    /**
+     * Calculates a lexical score (0.0 - 1.0) based on text matching.
+     *
+     * Scoring Algorithm:
+     * - Exact match: 1.0
+     * - Partial match (Regex): Weighted (70% Title, 30% Description).
+     * - Penalty: Returns 0 if no complete word matches.
+     *
+     * @param product - The product to evaluate.
+     * @param query - The search text from the user.
+     */
     private calculateLexicalScore(product: Product, query: string): number {
-        const lowerQuery = query.toLowerCase();
+        const cleanQuery = query.toLowerCase().trim();
+        const queryWords = cleanQuery.split(/\s+/).filter(w => w.length > 2);
+
+        if (queryWords.length === 0) return 0;
+
         const lowerTitle = product.title.toLowerCase();
         const lowerDesc = product.description?.toLowerCase() ?? '';
 
-        if (lowerTitle === lowerQuery) return 0.95;
-        if (lowerTitle.includes(lowerQuery)) return 0.85;
-        if (lowerQuery.includes(lowerTitle)) return 0.75;
-        if (lowerDesc.includes(lowerQuery)) return 0.65;
+        if (lowerTitle === cleanQuery) return 1.0;
 
-        return 0.5;
+        const WEIGHT_TITLE = 0.7;
+        const WEIGHT_DESC = 0.3;
+
+        let matchesTitle = 0;
+        let matchesDesc = 0;
+
+        const uniqueQueryWords = [...new Set(queryWords)];
+
+        uniqueQueryWords.forEach(word => {
+            const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(`\\b${escapedWord}\\b`, 'i');
+
+            if (regex.test(lowerTitle)) matchesTitle++;
+            if (regex.test(lowerDesc)) matchesDesc++;
+        });
+
+        const titleScore = (matchesTitle / uniqueQueryWords.length) * WEIGHT_TITLE;
+        const descScore = (matchesDesc / uniqueQueryWords.length) * WEIGHT_DESC;
+        const totalScore = titleScore + descScore;
+
+        if (lowerTitle.includes(cleanQuery)) {
+            return Math.min(totalScore + 0.2, 1.0);
+        }
+
+        return parseFloat(totalScore.toFixed(2));
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Batch Semantic Search (existing)
-    // ─────────────────────────────────────────────────────────────────────────
 
     /**
      * Executes parallel semantic search for multiple queries.

@@ -232,7 +232,7 @@ SELECT
     1 - (p.embedding <=> $1::vector) as similarity
 FROM products p
 WHERE p.embedding IS NOT NULL
-  AND 1 - (p.embedding <=> $1::vector) >= $2  -- threshold
+  AND 1 - (p.embedding <=> $1::vector) >= $2
 ORDER BY p.embedding <=> $1::vector ASC
 LIMIT $3
 ```
@@ -448,12 +448,3 @@ gcloud projects add-iam-policy-binding PROJECT_ID \
 - [ ] **Category Filtering:** Filter semantic results by category
 - [ ] **Personalization:** Boost results based on user preferences
 - [ ] **A/B Testing:** Compare semantic vs. keyword search performance
-
----
-
-## References
-
-- [Google Vertex AI Text Embeddings](https://cloud.google.com/vertex-ai/docs/generative-ai/embeddings/get-text-embeddings)
-- [pgvector GitHub](https://github.com/pgvector/pgvector)
-- [Cosine Similarity Explanation](https://en.wikipedia.org/wiki/Cosine_similarity)
-- [NestJS Circular Dependency](https://docs.nestjs.com/fundamentals/circular-dependency)
