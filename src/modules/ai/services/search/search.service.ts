@@ -49,7 +49,7 @@ export class SearchService {
         ]);
 
         // Merge and rank results
-        const merged = this.mergeResults(semanticResults, lexicalResults);
+        const merged = this.mergeResults(semanticResults, lexicalResults, query);
 
         this.logger.debug(
             `Hybrid search "${query}": ${semanticResults.length} semantic, ${lexicalResults.length} lexical, ${merged.length} merged`,
@@ -98,17 +98,13 @@ export class SearchService {
         }
     }
 
-    /**
-     * Merges semantic and lexical results with scoring.
-     * Products appearing in both get a boost.
-     */
     private mergeResults(
         semantic: SearchProductResult[],
         lexical: Product[],
+        query: string,
     ): HybridProductResult[] {
         const scoreMap = new Map<string, HybridProductResult>();
 
-        // Process semantic results (score = similarity 0.0 - 1.0)
         semantic.forEach(p => {
             scoreMap.set(p.id, {
                 id: p.id,
@@ -121,13 +117,12 @@ export class SearchService {
             });
         });
 
-        // Process lexical results
         lexical.forEach(p => {
             const primaryAsset = p.assets?.find(a => a.isPrimary);
             const existing = scoreMap.get(p.id);
+            const lexicalScore = this.calculateLexicalScore(p, query);
 
             if (existing) {
-                // Boost: appears in both searches
                 existing.score = Math.min(existing.score + 0.3, 1.0);
                 existing.matchType = 'hybrid';
             } else {
@@ -137,15 +132,27 @@ export class SearchService {
                     description: p.description,
                     price: Number(p.price),
                     imageUrl: primaryAsset?.url ?? null,
-                    score: 0.5, // Base score for lexical-only matches
+                    score: lexicalScore,
                     matchType: 'lexical',
                 });
             }
         });
 
-        // Sort by score descending
         return Array.from(scoreMap.values())
             .sort((a, b) => b.score - a.score);
+    }
+
+    private calculateLexicalScore(product: Product, query: string): number {
+        const lowerQuery = query.toLowerCase();
+        const lowerTitle = product.title.toLowerCase();
+        const lowerDesc = product.description?.toLowerCase() ?? '';
+
+        if (lowerTitle === lowerQuery) return 0.95;
+        if (lowerTitle.includes(lowerQuery)) return 0.85;
+        if (lowerQuery.includes(lowerTitle)) return 0.75;
+        if (lowerDesc.includes(lowerQuery)) return 0.65;
+
+        return 0.5;
     }
 
     // ─────────────────────────────────────────────────────────────────────────
