@@ -31,11 +31,11 @@ export class ProductsService {
 
     try {
       console.log(`🧠 Generando embedding para producto ${savedProduct.id}...`);
-      await this.triggerEmbeddingGeneration(savedProduct.id);
+      await this.triggerEmbeddingGeneration(savedProduct.id); 
       console.log(`✅ Embedding generado correctamente.`);
-    } catch (error) {
+  } catch (error) {
       console.error(`❌ Falló la IA, pero el producto se guardó:`, error);
-    }
+  }
 
     if (assets?.length) {
       await this.createAssets(savedProduct.id, assets);
@@ -166,14 +166,11 @@ export class ProductsService {
     return !!(dto.title || dto.description || dto.keywords);
   }
 
-  /**
-   * Base query for product listings.
-   * Only loads assets (for images). Category and seller are loaded in findOne.
-   */
   private createBaseQuery() {
     return this.productRepository
       .createQueryBuilder('product')
-      .leftJoinAndSelect('product.assets', 'assets');
+      .leftJoinAndSelect('product.assets', 'assets')
+      .leftJoinAndSelect('product.category', 'category');
   }
 
   private async createAssets(
