@@ -138,16 +138,18 @@ export class SearchService {
             .sort((a, b) => b.score - a.score);
     }
 
-    /**
-     * Calculates a lexical score (0.0 - 1.0) based on text matching.
-     *
-     * Scoring Algorithm:
-     * - Exact match: 1.0
-     * - Partial match (Regex): Weighted (70% Title, 30% Description).
-     * - Penalty: Returns 0 if no complete word matches.
-     *
-     * @param product - The product to evaluate.
+/**
+     * Calculates a lexical score (0.0 - 1.0) based on text matching quality.
+     * * Scoring Algorithm:
+     * - Exact Title Match: 1.0 (Immediate return)
+     * - Keyword Density: Weighted (65% Title, 35% Description) using regex boundaries.
+     * - Smart Boosters:
+     * 1. Global Completeness (+0.2): All query words are present (split across title/desc).
+     * 2. Phrase Match (+0.1): Exact phrase found in description.
+     * 3. Partial Title (+0.15): Title contains the query as a continuous substring.
+     * * @param product - The product to evaluate.
      * @param query - The search text from the user.
+     * @returns Normalized score capped at 1.0 (Returns 0 if no keywords match).
      */
     private calculateLexicalScore(product: Product, query: string): number {
         const cleanQuery = query.toLowerCase().trim();
@@ -160,31 +162,42 @@ export class SearchService {
 
         if (lowerTitle === cleanQuery) return 1.0;
 
-        const WEIGHT_TITLE = 0.7;
-        const WEIGHT_DESC = 0.3;
-
-        let matchesTitle = 0;
-        let matchesDesc = 0;
-
         const uniqueQueryWords = [...new Set(queryWords)];
+        const wordsFoundInTitle = new Set<string>();
+        const wordsFoundInDesc = new Set<string>();
 
         uniqueQueryWords.forEach(word => {
             const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             const regex = new RegExp(`\\b${escapedWord}\\b`, 'i');
 
-            if (regex.test(lowerTitle)) matchesTitle++;
-            if (regex.test(lowerDesc)) matchesDesc++;
+            if (regex.test(lowerTitle)) wordsFoundInTitle.add(word);
+            if (regex.test(lowerDesc)) wordsFoundInDesc.add(word);
         });
 
-        const titleScore = (matchesTitle / uniqueQueryWords.length) * WEIGHT_TITLE;
-        const descScore = (matchesDesc / uniqueQueryWords.length) * WEIGHT_DESC;
-        const totalScore = titleScore + descScore;
+        const WEIGHT_TITLE = 0.65;
+        const WEIGHT_DESC = 0.35;
 
-        if (lowerTitle.includes(cleanQuery)) {
-            return Math.min(totalScore + 0.2, 1.0);
+        const titleScore = (wordsFoundInTitle.size / uniqueQueryWords.length) * WEIGHT_TITLE;
+        const descScore = (wordsFoundInDesc.size / uniqueQueryWords.length) * WEIGHT_DESC;
+
+        let totalScore = titleScore + descScore;
+
+        const allWordsFound = uniqueQueryWords.every(w =>
+            wordsFoundInTitle.has(w) || wordsFoundInDesc.has(w)
+        );
+        if (allWordsFound) {
+            totalScore += 0.2;
         }
 
-        return parseFloat(totalScore.toFixed(2));
+        if (lowerDesc.includes(cleanQuery)) {
+            totalScore += 0.1;
+        }
+
+        if (lowerTitle.includes(cleanQuery)) {
+            totalScore += 0.15;
+        }
+
+        return Math.min(parseFloat(totalScore.toFixed(2)), 1.0);
     }
 
     /**
