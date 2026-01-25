@@ -144,14 +144,3 @@ The hybrid search uses these weight constants defined in `search.service.ts`:
 | `FETCH_MULTIPLIER` | 3 | Fetches 3x the limit to ensure best results after merge |
 | `WEIGHT_TITLE` | 0.7 | 70% weight for title matches |
 | `WEIGHT_DESC` | 0.3 | 30% weight for description matches |
-
----
-
-## Files
-
-| File | Purpose |
-|------|---------|
-| [search.service.ts](file:///c:/Users/Jherson/Desktop/imagineCup/itera-back/src/modules/ai/services/search/search.service.ts) | Main search orchestration logic |
-| [search.controller.ts](file:///c:/Users/Jherson/Desktop/imagineCup/itera-back/src/modules/ai/controllers/search.controller.ts) | HTTP endpoints |
-| [hybrid-search.dto.ts](file:///c:/Users/Jherson/Desktop/imagineCup/itera-back/src/modules/ai/dto/hybrid-search.dto.ts) | Request validation |
-| [product-vector.repository.ts](file:///c:/Users/Jherson/Desktop/imagineCup/itera-back/src/modules/ai/repositories/product-vector.repository.ts) | pgvector SQL queries |
