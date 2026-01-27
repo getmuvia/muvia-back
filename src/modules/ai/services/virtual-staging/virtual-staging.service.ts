@@ -44,7 +44,7 @@ export class VirtualStagingService {
             analysis.style = dto.preferredStyle;
         }
 
-        const maxProducts = dto.maxProducts ?? 10;
+        const maxProducts = dto.maxProducts ?? 4;
         const products = await this.findMatchingProducts(analysis, maxProducts);
 
         const prompt = this.buildGenerationPrompt(analysis, products);
@@ -212,7 +212,7 @@ export class VirtualStagingService {
         products: HybridProductResult[],
     ): string {
         const productDescriptions = products
-            .slice(0, 6) // Limit to avoid token overflow
+            .slice(0, 3) // Limit to avoid token overflow
             .map(p => `- ${p.title}`)
             .join('\n');
 
