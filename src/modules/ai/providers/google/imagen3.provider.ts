@@ -34,7 +34,7 @@ export class Imagen3Provider implements IImageGenerator {
         this.location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
 
-        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-generate');
+        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-generate-001');
 
         if (!this.projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');

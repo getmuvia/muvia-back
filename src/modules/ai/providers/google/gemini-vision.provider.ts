@@ -22,12 +22,14 @@ export class GeminiVisionProvider implements IVisionProvider {
     private readonly model: GenerativeModel;
     private readonly bucketName: string;
 
-    private readonly MODEL_NAME = 'gemini-2.5-pro';
+    private readonly MODEL_NAME: string;
 
     constructor(private readonly configService: ConfigService) {
         const projectId = this.configService.get<string>('GCP_PROJECT_ID');
         const location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
+
+        this.MODEL_NAME = this.configService.get<string>('GCP_GEMINI_MODEL', 'gemini-1.5-pro');
 
         if (!projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');
@@ -50,28 +52,78 @@ export class GeminiVisionProvider implements IVisionProvider {
 
         this.logger.debug(`Analyzing room image via ${input.key ? 'gs://' : 'URL download'}...`);
 
-        const response = await this.model.generateContent({
-            contents: [
-                {
-                    role: 'user',
-                    parts: [imagePart, { text: prompt }],
-                },
-            ],
-            generationConfig: {
-                temperature: 0.2,
-                maxOutputTokens: 8192,
-                responseMimeType: 'application/json',
-            },
-        });
+        try {
+            // Wrap API call in retry logic for 429/Quota errors
+            const response = await this.retryWithBackoff(async () => {
+                return this.model.generateContent({
+                    contents: [
+                        {
+                            role: 'user',
+                            parts: [imagePart, { text: prompt }],
+                        },
+                    ],
+                    generationConfig: {
+                        temperature: 0.2,
+                        maxOutputTokens: 8192,
+                        responseMimeType: 'application/json',
+                    },
+                });
+            });
 
-        const result = response.response;
-        const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+            const result = response.response;
+            const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-        if (!text) {
-            throw new Error('No response from Gemini Vision');
+            if (!text) {
+                throw new Error('No response from Gemini Vision');
+            }
+
+            return this.parseResponse(text);
+        } catch (error) {
+            this.logger.error(`Room analysis failed: ${error.message}`);
+            throw error;
+        }
+    }
+
+    /**
+     * Retries an operation if it encounters a 429 error.
+     * Uses exponential backoff strategy.
+     */
+    private async retryWithBackoff<T>(
+        operation: () => Promise<T>,
+        maxRetries: number = 3,
+        initialDelay: number = 2000,
+    ): Promise<T> {
+        let retries = 0;
+        while (true) {
+            try {
+                return await operation();
+            } catch (error) {
+                if (!this.isRetryableError(error) || retries >= maxRetries) {
+                    throw error;
+                }
+
+                const delay = initialDelay * Math.pow(2, retries);
+                this.logger.warn(`Quota exceeded (429) for model ${this.MODEL_NAME}. Retrying in ${delay}ms... (Attempt ${retries + 1}/${maxRetries})`);
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+                retries++;
+            }
+        }
+    }
+
+    /**
+     * Determines if an error is a 429 Quota Exceeded error.
+     */
+    private isRetryableError(error: any): boolean {
+        if (error?.code === 429) return true;
+        if (error?.status === 429 || error?.status === 'RESOURCE_EXHAUSTED') return true;
+
+        const message = error?.message || '';
+        if (message.includes('429') || message.includes('Quota exceeded') || message.includes('RESOURCE_EXHAUSTED')) {
+            return true;
         }
 
-        return this.parseResponse(text);
+        return false;
     }
 
     /**
