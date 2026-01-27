@@ -22,7 +22,7 @@ export class GeminiVisionProvider implements IVisionProvider {
     private readonly model: GenerativeModel;
     private readonly bucketName: string;
 
-    private readonly MODEL_NAME = 'gemini-1.5-flash';
+    private readonly MODEL_NAME = 'gemini-1.5-flash-001';
 
     constructor(private readonly configService: ConfigService) {
         const projectId = this.configService.get<string>('GCP_PROJECT_ID');
@@ -83,9 +83,9 @@ export class GeminiVisionProvider implements IVisionProvider {
         if (input.key) {
             const gsUri = `gs://${this.bucketName}/${input.key}`;
             const mimeType = this.inferMimeType(input.key);
-            
+
             this.logger.debug(`Using native GCS reference: ${gsUri}`);
-            
+
             return {
                 fileData: {
                     fileUri: gsUri,
@@ -96,9 +96,9 @@ export class GeminiVisionProvider implements IVisionProvider {
 
         if (input.url) {
             this.logger.debug(`Downloading external image: ${input.url}`);
-            
+
             const { buffer, mimeType } = await this.downloadImage(input.url);
-            
+
             return {
                 inlineData: {
                     mimeType,
@@ -116,14 +116,14 @@ export class GeminiVisionProvider implements IVisionProvider {
     private async downloadImage(url: string): Promise<{ buffer: Buffer; mimeType: string }> {
         try {
             const response = await fetch(url);
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
             const contentType = response.headers.get('content-type') || 'image/jpeg';
             const arrayBuffer = await response.arrayBuffer();
-            
+
             return {
                 buffer: Buffer.from(arrayBuffer),
                 mimeType: contentType.split(';')[0],
