@@ -59,7 +59,7 @@ export class GeminiVisionProvider implements IVisionProvider {
             ],
             generationConfig: {
                 temperature: 0.2,
-                maxOutputTokens: 1024,
+                maxOutputTokens: 8192,
                 responseMimeType: 'application/json',
             },
         });
