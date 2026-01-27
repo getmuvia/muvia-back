@@ -27,12 +27,14 @@ export class Imagen3Provider implements IImageGenerator {
     private readonly projectId: string;
     private readonly location: string;
 
-    private readonly MODEL_NAME = 'imagen-3.0-generate-002';
+    private readonly MODEL_NAME: string;
 
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
         this.location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
+
+        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-generate');
 
         if (!this.projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');
@@ -42,12 +44,12 @@ export class Imagen3Provider implements IImageGenerator {
         this.vertexAI = new VertexAI({ project: this.projectId, location: this.location });
         this.storage = new Storage();
 
-        this.logger.log(`✅ Imagen3Provider initialized`);
+        this.logger.log(`✅ Imagen3Provider initialized with model: ${this.MODEL_NAME}`);
     }
 
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         const startTime = Date.now();
-        
+
         if (!request.imageSource.key && !request.imageSource.url) {
             throw new BadRequestException('Either imageKey or imageUrl must be provided');
         }
@@ -58,26 +60,29 @@ export class Imagen3Provider implements IImageGenerator {
             const imagePart = await this.resolveImagePart(request.imageSource);
             const model = this.vertexAI.getGenerativeModel({ model: this.MODEL_NAME });
 
-            const response = await model.generateContent({
-                contents: [
-                    {
-                        role: 'user',
-                        parts: [
-                            imagePart,
-                            { text: this.buildGenerationPrompt(request) },
-                        ],
+            // Wrap API call in retry logic for 429/Quota errors
+            const response = await this.retryWithBackoff(async () => {
+                return model.generateContent({
+                    contents: [
+                        {
+                            role: 'user',
+                            parts: [
+                                imagePart,
+                                { text: this.buildGenerationPrompt(request) },
+                            ],
+                        },
+                    ],
+                    generationConfig: {
+                        temperature: 0.4,
+                        maxOutputTokens: 2048,
                     },
-                ],
-                generationConfig: {
-                    temperature: 0.4,
-                    maxOutputTokens: 2048,
-                },
+                });
             });
 
             const textResult = response.response.candidates?.[0]?.content?.parts?.[0]?.text;
 
             this.logger.warn('Imagen 3 image generation not yet fully implemented - returning placeholder');
-            
+
             const generationTimeMs = Date.now() - startTime;
 
             return {
@@ -94,6 +99,49 @@ export class Imagen3Provider implements IImageGenerator {
     }
 
     /**
+     * Retries an operation if it encounters a 429 error.
+     * Uses exponential backoff strategy.
+     */
+    private async retryWithBackoff<T>(
+        operation: () => Promise<T>,
+        maxRetries: number = 3,
+        initialDelay: number = 2000,
+    ): Promise<T> {
+        let retries = 0;
+        while (true) {
+            try {
+                return await operation();
+            } catch (error) {
+                if (!this.isRetryableError(error) || retries >= maxRetries) {
+                    throw error;
+                }
+
+                const delay = initialDelay * Math.pow(2, retries);
+                this.logger.warn(`Quota exceeded (429) for model ${this.MODEL_NAME}. Retrying in ${delay}ms... (Attempt ${retries + 1}/${maxRetries})`);
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+                retries++;
+            }
+        }
+    }
+
+    /**
+     * Determines if an error is a 429 Quota Exceeded error.
+     */
+    private isRetryableError(error: any): boolean {
+        // Check for 429 in various locations depending on error structure from Google SDK
+        if (error?.code === 429) return true;
+        if (error?.status === 429 || error?.status === 'RESOURCE_EXHAUSTED') return true;
+
+        const message = error?.message || '';
+        if (message.includes('429') || message.includes('Quota exceeded') || message.includes('RESOURCE_EXHAUSTED')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * Resolves image input to a Gemini-compatible Part.
      * Priority: key (gs://) > url (download)
      */
@@ -101,9 +149,9 @@ export class Imagen3Provider implements IImageGenerator {
         if (input.key) {
             const gsUri = `gs://${this.bucketName}/${input.key}`;
             const mimeType = this.inferMimeType(input.key);
-            
+
             this.logger.debug(`Using native GCS reference: ${gsUri}`);
-            
+
             return {
                 fileData: {
                     fileUri: gsUri,
@@ -114,9 +162,9 @@ export class Imagen3Provider implements IImageGenerator {
 
         if (input.url) {
             this.logger.debug(`Downloading external image: ${input.url}`);
-            
+
             const { buffer, mimeType } = await this.downloadImage(input.url);
-            
+
             return {
                 inlineData: {
                     mimeType,
@@ -134,14 +182,14 @@ export class Imagen3Provider implements IImageGenerator {
     private async downloadImage(url: string): Promise<{ buffer: Buffer; mimeType: string }> {
         try {
             const response = await fetch(url);
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
             const contentType = response.headers.get('content-type') || 'image/jpeg';
             const arrayBuffer = await response.arrayBuffer();
-            
+
             return {
                 buffer: Buffer.from(arrayBuffer),
                 mimeType: contentType.split(';')[0],
