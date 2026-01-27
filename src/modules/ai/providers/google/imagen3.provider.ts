@@ -27,7 +27,7 @@ export class Imagen3Provider implements IImageGenerator {
     private readonly projectId: string;
     private readonly location: string;
 
-    private readonly MODEL_NAME = 'imagen-4.0-ultra-generate-001';
+    private readonly MODEL_NAME = 'imagen-3.0-generate-002';
 
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
