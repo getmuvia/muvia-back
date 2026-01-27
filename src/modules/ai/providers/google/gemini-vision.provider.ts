@@ -22,7 +22,7 @@ export class GeminiVisionProvider implements IVisionProvider {
     private readonly model: GenerativeModel;
     private readonly bucketName: string;
 
-    private readonly MODEL_NAME = 'gemini-3-flash-preview';
+    private readonly MODEL_NAME = 'gemini-2.5-pro';
 
     constructor(private readonly configService: ConfigService) {
         const projectId = this.configService.get<string>('GCP_PROJECT_ID');
