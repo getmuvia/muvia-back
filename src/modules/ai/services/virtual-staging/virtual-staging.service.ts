@@ -10,13 +10,6 @@ import type { VirtualStagingResponseDto, VirtualStagingRequestDto } from '../../
 /**
  * Orchestrates the virtual staging workflow.
  * 
- * This service is AGNOSTIC to AI providers - it only knows about interfaces.
- * The actual implementations (Google, OpenAI, etc.) are injected via DI.
- * 
- * Flow:
- * 1. Analyze room image (via IVisionProvider)
- * 2. Search matching products (via existing SearchService)
- * 3. Generate staged image (via IImageGenerator)
  */
 @Injectable()
 export class VirtualStagingService {
