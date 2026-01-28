@@ -38,17 +38,50 @@ export class VectorService implements OnModuleInit {
         }
 
         try {
-            const [response] = await this.client.predict({
-                endpoint: endpointResourceName,
-                instances: [instanceValue as any], 
-            });
+            // Apply retry logic for 429s
+            return await this.retryWithBackoff(async () => {
+                const [response] = await this.client.predict({
+                    endpoint: endpointResourceName,
+                    instances: [instanceValue as any],
+                });
 
-            return this.extractEmbeddingFromResponse(response);
+                return this.extractEmbeddingFromResponse(response);
+            });
 
         } catch (error) {
             this.logger.error(`Vertex AI Prediction failed: ${error.message}`);
             throw new InternalServerErrorException(`Embedding generation failed: ${error.message}`);
         }
+    }
+
+    private async retryWithBackoff<T>(
+        operation: () => Promise<T>,
+        maxRetries: number = 3,
+        initialDelay: number = 1000,
+    ): Promise<T> {
+        let retries = 0;
+        while (true) {
+            try {
+                return await operation();
+            } catch (error) {
+                if (!this.isRetryableError(error) || retries >= maxRetries) {
+                    throw error;
+                }
+
+                const delay = initialDelay * Math.pow(2, retries);
+                this.logger.warn(`Quota 429 on Embeddings. Retrying in ${delay}ms... (Attempt ${retries + 1})`);
+
+                await new Promise(resolve => setTimeout(resolve, delay));
+                retries++;
+            }
+        }
+    }
+
+    private isRetryableError(error: any): boolean {
+        // Vertex AI gRPC errors often typically have code 8 (RESOURCE_EXHAUSTED) or 14 (UNAVAILABLE)
+        if (error?.code === 8 || error?.code === 429) return true;
+        if (error?.message?.includes('429') || error?.message?.includes('Quota') || error?.message?.includes('Resource exhausted')) return true;
+        return false;
     }
 
     toVectorString(embedding: number[]): string {
@@ -70,7 +103,7 @@ export class VectorService implements OnModuleInit {
 
         try {
             const apiEndpoint = `${this.location}-aiplatform.googleapis.com`;
-            
+
             this.client = new PredictionServiceClient({
                 apiEndpoint: apiEndpoint,
             });
@@ -85,7 +118,7 @@ export class VectorService implements OnModuleInit {
     private buildPredictionInstance(text: string, taskType: EmbeddingTaskType) {
         const instance: Record<string, any> = {
             content: text,
-            task_type: taskType    
+            task_type: taskType
         };
 
         if (taskType === 'RETRIEVAL_DOCUMENT') {

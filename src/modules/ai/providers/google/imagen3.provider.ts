@@ -34,7 +34,7 @@ export class Imagen3Provider implements IImageGenerator {
         this.location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
 
-        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-generate-001');
+        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-fast-generate-001');
 
         if (!this.projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');
@@ -60,7 +60,6 @@ export class Imagen3Provider implements IImageGenerator {
             const imagePart = await this.resolveImagePart(request.imageSource);
             const model = this.vertexAI.getGenerativeModel({ model: this.MODEL_NAME });
 
-            // Wrap API call in retry logic for 429/Quota errors
             const response = await this.retryWithBackoff(async () => {
                 return model.generateContent({
                     contents: [
@@ -77,7 +76,7 @@ export class Imagen3Provider implements IImageGenerator {
                         maxOutputTokens: 2048,
                     },
                 });
-            });
+            }, 5);
 
             const textResult = response.response.candidates?.[0]?.content?.parts?.[0]?.text;
 
@@ -129,7 +128,7 @@ export class Imagen3Provider implements IImageGenerator {
      * Determines if an error is a 429 Quota Exceeded error.
      */
     private isRetryableError(error: any): boolean {
-        // Check for 429 in various locations depending on error structure from Google SDK
+        
         if (error?.code === 429) return true;
         if (error?.status === 429 || error?.status === 'RESOURCE_EXHAUSTED') return true;
 
