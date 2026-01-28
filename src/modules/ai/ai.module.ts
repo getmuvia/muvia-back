@@ -21,9 +21,8 @@ import { VirtualStagingController } from './controllers/virtual-staging.controll
 import { VISION_PROVIDER } from './interfaces/vision-provider.interface';
 import { IMAGE_GENERATOR } from './interfaces/image-generator.interface';
 
-// Adapters (Implementations)
 import { GeminiVisionProvider } from './providers/google/gemini-vision.provider';
-import { Imagen3Provider } from './providers/google/imagen3.provider';
+import { ImagenProvider } from './providers/google/imagen.provider';
 
 /**
  * AI Module - Semantic search, embeddings, and virtual staging.
@@ -51,25 +50,22 @@ import { Imagen3Provider } from './providers/google/imagen3.provider';
     ],
 
     providers: [
-        // Existing services
         ProductVectorRepository,
         VectorService,
         EmbeddingService,
         SearchService,
 
-        // Virtual Staging - Ports & Adapters
-        // Change useClass to switch AI providers (e.g., OpenAIVisionProvider)
         {
             provide: VISION_PROVIDER,
             useClass: GeminiVisionProvider,
         },
         {
             provide: IMAGE_GENERATOR,
-            useClass: Imagen3Provider,
+            useClass: ImagenProvider,
         },
         VirtualStagingService,
     ],
 
     exports: [EmbeddingService],
 })
-export class AiModule {}
+export class AiModule { }
