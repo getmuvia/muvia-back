@@ -23,19 +23,19 @@ export class VirtualStagingService {
         private readonly imageGenerator: IImageGenerator,
 
         private readonly searchService: SearchService,
-    ) {}
+    ) { }
 
     /**
      * Process a room image and return staged version with product suggestions.
      */
     async stageRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
         const startTime = Date.now();
-        
+
         // Validate input
         if (!dto.imageKey && !dto.imageUrl) {
             throw new BadRequestException('Either imageKey or imageUrl must be provided');
         }
-        
+
         this.logger.log(`Starting virtual staging...`);
 
         const analysis = await this.analyzeRoomWithFallback(dto);
@@ -78,13 +78,13 @@ export class VirtualStagingService {
                 return await this.visionProvider.analyzeRoom({ key: dto.imageKey });
             } catch (error) {
                 this.logger.warn(`imageKey failed: ${error.message}`);
-                
+
                 // Fallback to URL if available
                 if (dto.imageUrl) {
                     this.logger.debug(`Falling back to imageUrl: ${dto.imageUrl}`);
                     return await this.visionProvider.analyzeRoom({ url: dto.imageUrl });
                 }
-                
+
                 throw error;
             }
         }
@@ -116,7 +116,7 @@ export class VirtualStagingService {
                 });
             } catch (error) {
                 this.logger.warn(`imageKey failed for generation: ${error.message}`);
-                
+
                 // Fallback to URL if available
                 if (dto.imageUrl) {
                     this.logger.debug(`Falling back to imageUrl for generation`);
@@ -125,7 +125,7 @@ export class VirtualStagingService {
                         imageSource: { url: dto.imageUrl },
                     });
                 }
-                
+
                 throw error;
             }
         }
@@ -158,7 +158,7 @@ export class VirtualStagingService {
 
         // Merge and deduplicate results
         const products = this.mergeAndRankProducts(searchResults, maxProducts);
-        
+
         this.logger.debug(`Found ${products.length} matching products`);
         return products;
     }
@@ -171,9 +171,12 @@ export class VirtualStagingService {
         const { suggestedFurniture, style, colorPalette } = analysis;
         const primaryColor = colorPalette[0] || '';
 
+        // Added LOG to see what we are suppressing
+        this.logger.debug(`Generating search queries for ${suggestedFurniture.length} items (Process limited to top 3 to save quota)`);
+
         // Create contextual queries for each furniture piece
-        return suggestedFurniture.slice(0, 5).map(furniture => {
-            // Combine furniture with style for better matching
+        // REDUCED LIMIT from 5 to 3 to avoid burst quota issues
+        return suggestedFurniture.slice(0, 3).map(furniture => {
             return `${furniture} ${style} ${primaryColor}`.trim();
         });
     }
