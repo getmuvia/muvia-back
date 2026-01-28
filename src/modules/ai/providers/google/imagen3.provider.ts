@@ -31,7 +31,7 @@ export class Imagen3Provider implements IImageGenerator {
 
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
-        this.location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
+        this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-east4');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
 
         this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-fast-generate-001');
@@ -41,6 +41,7 @@ export class Imagen3Provider implements IImageGenerator {
             throw new Error('GCP_PROJECT_ID is required for Imagen3Provider');
         }
 
+        this.logger.log(`Using region ${this.location} for Imagen...`);
         this.vertexAI = new VertexAI({ project: this.projectId, location: this.location });
         this.storage = new Storage();
 
@@ -128,7 +129,7 @@ export class Imagen3Provider implements IImageGenerator {
      * Determines if an error is a 429 Quota Exceeded error.
      */
     private isRetryableError(error: any): boolean {
-        
+
         if (error?.code === 429) return true;
         if (error?.status === 429 || error?.status === 'RESOURCE_EXHAUSTED') return true;
 
