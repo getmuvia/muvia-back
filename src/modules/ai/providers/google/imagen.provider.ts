@@ -22,122 +22,151 @@ export class ImagenProvider implements IImageGenerator {
 
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
-        // Usamos us-central1 (o la que funcionó en tu Postman)
+        // Usamos us-central1 por defecto (Gemini multimodal suele estar aquí)
         this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1'); 
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
         
-        // Modelo ESTÁNDAR (El que tiene cuota y funciona con texto)
-        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'imagen-3.0-generate-001');
+        // 🔥 RECUPERADO: Se lee del .env (GCP_IMAGEN_MODEL)
+        // Valor por defecto: 'gemini-2.0-flash-exp' (o puedes poner 'gemini-3-pro-image-preview' en tu .env)
+        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.0-flash-exp');
 
         this.storage = new Storage();
+        
+        this.logger.log(`✅ ImagenProvider initialized using model: ${this.MODEL_NAME} in ${this.location}`);
     }
 
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         const startTime = Date.now();
 
-        // 1. Obtener Token de Acceso (Igual que 'gcloud auth print-access-token')
-        const auth = new GoogleAuth({
-            scopes: 'https://www.googleapis.com/auth/cloud-platform'
-        });
+        // 1. Obtener Token
+        const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
         const client = await auth.getClient();
         const accessToken = await client.getAccessToken();
         const token = accessToken.token;
 
-        if (!token) throw new Error('Could not retrieve Google Cloud access token');
+        // 2. Endpoint de Generación de Gemini
+        // NOTA: Usamos :generateContent porque es la API de Gemini (que soporta input multimodal)
+        const endpoint = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}:generateContent`;
 
-        // 2. Endpoint REST (Exactamente el que usaste en Postman)
-        const endpoint = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}:predict`;
+        this.logger.debug(`🚀 Virtual Staging via Gemini Multimodal: ${endpoint}`);
 
-        this.logger.debug(`🚀 Generating image via REST API: ${endpoint}`);
+        // 3. Preparar las "Partes" (Imágenes + Texto)
+        const parts: any[] = [];
 
-        // 3. Construir el Body JSON
-        // IMPORTANTE: Este modelo es TEXT-TO-IMAGE. No enviamos 'image' bytes aquí para evitar el error 13.
-        const body = {
-            instances: [
-                {
-                    prompt: this.buildPrompt(request),
-                }
-            ],
-            parameters: {
-                sampleCount: 1,
-                aspectRatio: "1:1", // Puedes cambiar a "16:9" si prefieres
-                // includeRaiReasoning: true // Útil para depurar filtros de seguridad
+        // A. Añadir la imagen de la SALA (Contexto Visual)
+        if (request.imageSource.key || request.imageSource.url) {
+            try {
+                const roomBase64 = await this.resolveImageBase64(request.imageSource);
+                parts.push({
+                    inlineData: {
+                        mimeType: 'image/jpeg',
+                        data: roomBase64
+                    }
+                });
+                this.logger.debug('✅ Room image added to prompt context');
+            } catch (e) {
+                this.logger.warn(`Could not load source image: ${e.message}. Proceeding with text only.`);
             }
+        }
+
+        // B. Añadir el Prompt de Texto
+        parts.push({ text: this.buildPrompt(request) });
+
+        // 4. Construir el Body para Gemini
+        const body = {
+            contents: [{ role: 'user', parts: parts }],
+            generationConfig: {
+                // 🔥 ESTO ES CRÍTICO: Le decimos que responda con IMAGEN
+                responseModalities: ["IMAGE"], 
+                temperature: 0.4,
+                maxOutputTokens: 8192,
+                // Opcional: configurar aspect ratio si el modelo lo soporta en config
+            },
+            safetySettings: [
+                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' }
+            ]
         };
 
         try {
-            // 4. Llamada HTTP directa
+            // 5. Llamada REST
             const response = await axios.post(endpoint, body, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json; charset=utf-8'
+                    'Content-Type': 'application/json'
                 }
             });
 
-            // 5. Procesar Respuesta
-            const predictions = response.data.predictions;
-            if (!predictions || predictions.length === 0) {
-                throw new Error('No predictions returned from Vertex AI');
+            // 6. Extraer la imagen de la respuesta de Gemini
+            const candidates = response.data.candidates;
+            if (!candidates || candidates.length === 0) throw new Error('No content generated');
+
+            const generatedPart = candidates[0].content.parts[0];
+            
+            // Verificamos si realmente nos devolvió una imagen
+            if (!generatedPart.inlineData || !generatedPart.inlineData.data) {
+                this.logger.error('Gemini response:', JSON.stringify(candidates[0]));
+                throw new Error('Gemini returned text instead of image. Verify model supports image generation.');
             }
 
-            const base64Image = predictions[0].bytesBase64Encoded;
-            if (!base64Image) {
-                throw new Error('No image bytes found in response');
-            }
-
-            // 6. Subir a GCS y devolver URL
+            const base64Image = generatedPart.inlineData.data;
+            
+            // 7. Subir a Storage
             const imageUrl = await this.uploadToGcs(base64Image);
-
-            const generationTimeMs = Date.now() - startTime;
-            this.logger.log(`✅ Image generated successfully in ${generationTimeMs}ms`);
 
             return {
                 imageUrl,
-                metadata: {
-                    model: this.MODEL_NAME,
-                    generationTimeMs,
-                },
+                metadata: { model: this.MODEL_NAME, generationTimeMs: Date.now() - startTime },
             };
 
         } catch (error) {
-            // Manejo de errores detallado
-            const apiError = error.response?.data?.error?.message || error.message;
-            this.logger.error(`❌ REST API Failed: ${apiError}`);
-            
-            // Si es error de cuota, podrías implementar aquí el reintento simple
-            if (apiError.includes('429')) {
-                 this.logger.warn('Hit quota limit (429). Consider implementing a retry loop here.');
-            }
-
-            throw new Error(`Imagen generation failed: ${apiError}`);
+            const msg = error.response?.data?.error?.message || error.message;
+            this.logger.error(`❌ Gemini Generation Failed: ${msg}`);
+            throw new Error(`Virtual Staging failed: ${msg}`);
         }
     }
 
+    // --- Helpers ---
+
     private buildPrompt(request: ImageGenerationRequest): string {
-        let prompt = request.prompt;
+        // Prompt optimizado para "Staging"
+        return `You are an expert interior designer. 
+        Input: The first image provided is an empty room.
+        Task: Generate a photorealistic image of this EXACT room fully furnished.
         
-        if (request.style === 'photorealistic') {
-            prompt += ', photorealistic, 4k, natural lighting, interior design photography, high resolution';
-        }
+        Requirements:
+        1. KEEP the room structure, windows, floor, and walls EXACTLY the same.
+        2. ${request.prompt}
+        3. Style: ${request.style || 'Modern'}.
+        4. Output ONLY the generated image.`;
+    }
 
-        if (request.negativePrompt) {
-            prompt += ` --negative_prompt="${request.negativePrompt}"`;
+    private async resolveImageBase64(input: any): Promise<string> {
+        if (input.key) {
+            const file = this.storage.bucket(this.bucketName).file(input.key);
+            const [buffer] = await file.download();
+            return buffer.toString('base64');
+        } else if (input.url) {
+            const res = await fetch(input.url);
+            if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
+            const arrayBuffer = await res.arrayBuffer();
+            return Buffer.from(arrayBuffer).toString('base64');
         }
-
-        return prompt;
+        throw new Error('No image source');
     }
 
     private async uploadToGcs(base64: string): Promise<string> {
         const buffer = Buffer.from(base64, 'base64');
-        const filename = `generated/staged-${uuidv4()}.png`;
+        const filename = `generated/staging-${uuidv4()}.png`;
         const file = this.storage.bucket(this.bucketName).file(filename);
-
-        await file.save(buffer, {
-            contentType: 'image/png',
-            metadata: { cacheControl: 'public, max-age=31536000' },
+        
+        await file.save(buffer, { 
+            contentType: 'image/png', 
+            metadata: { cacheControl: 'public, max-age=31536000' } 
         });
-
-        // Asegúrate de que tu bucket permite lectura pública o usa signedUrl si es privado
+        
         return `https://storage.googleapis.com/${this.bucketName}/${filename}`;
     }
 }
