@@ -128,40 +128,51 @@ export class VirtualStagingService {
         const productInstructions = products
             .map((p, index) => {
                 const imageIndex = index + 2;
+                // AQUÍ ESTÁ LA CLAVE: Instrucciones dinámicas según el tipo de mueble
                 return `Product #${index + 1}:
-- Type: ${p.title}
-- VISUAL SOURCE: IMAGE ${imageIndex}.
-- INSTRUCTION: Place this EXACT object (same color/shape) as the centerpiece.`;
+- Item: ${p.title}
+- REFERENCE SOURCE: Use IMAGE ${imageIndex} strictly for MATERIALS and COLOR.
+- POSITIONING RULES: 
+  * If it's a SEATING (chair, sofa): Arrange it facing the center or a focal point.
+  * If it's STORAGE (wardrobe, bookshelf, cabinet): ALIGN IT AGAINST A WALL. Do not obstruct pathways.
+  * If it's a TABLE (dining, coffee): Place it centrally relative to seating or the room.
+  * If it's a RUG: Place it on the floor, anchoring the furniture group.
+- GEOMETRY: Rotate the 3D model of the object to match the room's perspective perfectly.`;
             })
             .join('\n\n');
 
-        // 🔥 CAMBIOS CLAVE AQUÍ ABAJO:
-        return `TASK: Create a fully furnished and DECORATED interior design based on the empty room (Image 1).
+        return `TASK: Act as an expert 3D Interior Designer. Furnish the empty room (Image 1) creating a realistic, lived-in scene.
 
 CONTEXT:
-- Image 1: Base Room structure.
-- Image 2, 3...: KEY FURNITURE pieces that MUST be included.
+- Image 1: The Base Room (Perspective and lighting reference).
+- Subsequent Images: The Furniture Catalogue (Material and Design reference).
 
-INSTRUCTIONS:
-1. **CORE FURNITURE:** Place the Key Furniture pieces listed below. You MUST use their exact visual appearance from the reference images.
+INSTRUCTIONS FOR "SMART STAGING":
+
+1. **ANALYZE THE PERSPECTIVE:** Look at the floor lines and walls of Image 1. All inserted furniture MUST align with these vanishing points.
+
+2. **PLACE THE KEY PRODUCTS (INTELLIGENTLY):**
 ${productInstructions}
 
-2. **COMPLEMENTARY DECOR (CRITICAL):** - You act as a professional interior designer. DO NOT just place the furniture in an empty room.
-   - **FILL THE VOIDS:** Add stylistic decor elements that match the '${analysis.style}' style to make the room feel lived-in and cozy.
-   - **ADD:** Rugs, plants, wall art, lamps, books, cushions, curtains, and small accessories.
-   - **COHERENCE:** The new decor must match the color palette (${analysis.colorPalette.join(', ')}).
+   **CRITICAL RULE FOR PRODUCTS:** - You MUST keep the visual identity (Color, Fabric, Style) from the reference images.
+   - BUT you MUST CHANGE the 3D rotation and angle to match the new position in the room.
 
-3. **SCENE COMPOSITION:**
-   - Arrange the Key Furniture (Images 2+) in the best layout for this room type.
-   - Integrate the decor naturally around them (e.g., a rug under the chair, a plant in the corner, art on the walls).
+3. **CREATE THE SCENE (CONTEXTUAL FILL):**
+   - Don't just leave the products isolated. Create a logical environment for them.
+   - **For Seating:** Generate appropriate tables or complementary seating nearby.
+   - **For Tables:** Add centerpieces, chairs, or placement settings.
+   - **For Storage/Shelves:** Add books, plants, or decor items inside/on top to make it look used.
+   - **For Bedroom items:** Ensure proper orientation relative to the "bed" wall.
+   
+   Add ambient decor: Plants, lamps, art, and soft shadows to ground the objects.
 
 STRICT CONSTRAINTS:
-- ✅ YES: Add plants, rugs, art, lighting, and accessories.
-- ✅ YES: Change the lighting mood to be inviting.
-- ❌ NO: Do NOT change the walls, floor material, windows, or structural layout of Image 1.
-- ❌ NO: Do NOT change the color or shape of the Key Furniture (Images 2+).
+- ✅ YES: Rotate objects, change perspective, create supporting furniture.
+- ✅ YES: Add decoration (plants, rugs) to make it cozy.
+- ❌ NO: Do NOT change the architectural shell (walls/windows) of Image 1.
+- ❌ NO: Do NOT change the COLOR or MATERIAL of the Key Products.
 
-Style: ${analysis.style} (High-end Magazine Quality).
+Style: ${analysis.style}. Lighting: Natural and soft.
 Output ONLY the final image.`;
     }
 }
