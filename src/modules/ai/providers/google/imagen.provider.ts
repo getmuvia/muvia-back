@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleAuth } from 'google-auth-library';
 import { Storage } from '@google-cloud/storage';
@@ -9,7 +9,18 @@ import {
     ImageGenerationRequest,
     ImageGenerationResult,
 } from '../../interfaces/image-generator.interface';
+import { RetryService, ImageResolverService } from '../../core';
+import { buildImageGenerationPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
 
+/**
+ * Gemini-based Image Generator implementation of IImageGenerator.
+ * Uses Vertex AI Gemini multimodal models for image generation.
+ *
+ * Supports:
+ * - Room image as context (GCS key or URL)
+ * - Product reference images for visual consistency
+ * - Configurable safety settings
+ */
 @Injectable()
 export class ImagenProvider implements IImageGenerator {
     private readonly logger = new Logger(ImagenProvider.name);
@@ -20,14 +31,14 @@ export class ImagenProvider implements IImageGenerator {
     private readonly location: string;
     private readonly MODEL_NAME: string;
 
-    constructor(private readonly configService: ConfigService) {
+    constructor(
+        private readonly configService: ConfigService,
+        private readonly retryService: RetryService,
+        private readonly imageResolver: ImageResolverService,
+    ) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
-        // Usamos us-central1 por defecto (Gemini multimodal suele estar aquí)
         this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-
-        // 🔥 RECUPERADO: Se lee del .env (GCP_IMAGEN_MODEL)
-        // Valor por defecto: 'gemini-2.0-flash-exp' (o puedes poner 'gemini-3-pro-image-preview' en tu .env)
         this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.0-flash-exp');
 
         this.storage = new Storage();
@@ -38,45 +49,94 @@ export class ImagenProvider implements IImageGenerator {
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         const startTime = Date.now();
 
-        // 1. Obtener Token
+        const token = await this.getAccessToken();
+        const endpoint = this.buildEndpoint();
+        const parts = await this.buildRequestParts(request);
+
+        this.logger.debug(`Generating staged image via ${this.MODEL_NAME}`);
+
+        const body = {
+            contents: [{ role: 'user', parts }],
+            generationConfig: STAGING_GENERATION_CONFIG.generationConfig,
+            safetySettings: STAGING_GENERATION_CONFIG.safetySettings,
+        };
+
+        try {
+            const response = await this.retryService.withExponentialBackoff(
+                () => axios.post(endpoint, body, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                }),
+                {
+                    operationName: `Gemini Image Generation (${this.MODEL_NAME})`,
+                    isRetryable: (err) => this.retryService.isQuotaExceededError(err),
+                    initialDelayMs: 2000,
+                },
+            );
+
+            const base64Image = this.extractImageFromResponse(response.data);
+            const imageUrl = await this.uploadToGcs(base64Image);
+
+            return {
+                imageUrl,
+                metadata: { model: this.MODEL_NAME, generationTimeMs: Date.now() - startTime },
+            };
+        } catch (error) {
+            const msg = error.response?.data?.error?.message || error.message;
+            this.logger.error(`Image generation failed: ${msg}`);
+            throw new Error(`Virtual Staging failed: ${msg}`);
+        }
+    }
+
+    /**
+     * Gets OAuth2 access token for GCP API calls.
+     */
+    private async getAccessToken(): Promise<string> {
         const auth = new GoogleAuth({ scopes: 'https://www.googleapis.com/auth/cloud-platform' });
         const client = await auth.getClient();
         const accessToken = await client.getAccessToken();
-        const token = accessToken.token;
+        return accessToken.token ?? '';
+    }
 
-        // 2. Endpoint de Generación de Gemini
-        // NOTA: Usamos :generateContent porque es la API de Gemini (que soporta input multimodal)
-        const endpoint = `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}:generateContent`;
+    /**
+     * Builds the Vertex AI endpoint URL.
+     */
+    private buildEndpoint(): string {
+        return `https://${this.location}-aiplatform.googleapis.com/v1/projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}:generateContent`;
+    }
 
-        this.logger.debug(`🚀 Virtual Staging via Gemini Multimodal: ${endpoint}`);
-
-        // 3. Preparar las "Partes" (Imágenes + Texto)
+    /**
+     * Builds request parts array (images + text prompt).
+     */
+    private async buildRequestParts(request: ImageGenerationRequest): Promise<any[]> {
         const parts: any[] = [];
 
-        // A. Añadir la imagen de la SALA (Contexto Visual)
+        // Add room image
         if (request.imageSource.key || request.imageSource.url) {
             try {
-                const roomBase64 = await this.resolveImageBase64(request.imageSource);
+                const roomBase64 = await this.imageResolver.toBase64(request.imageSource);
                 parts.push({
                     inlineData: {
-                        mimeType: 'image/jpeg',
+                        mimeType: request.imageSource.key
+                            ? this.imageResolver.inferMimeType(request.imageSource.key)
+                            : 'image/jpeg',
                         data: roomBase64
                     }
                 });
-                this.logger.debug('✅ Room image added to prompt context');
+                this.logger.debug('Room image added to context');
             } catch (e) {
-                this.logger.warn(`Could not load source image: ${e.message}. Proceeding with text only.`);
+                this.logger.warn(`Could not load source image: ${e.message}`);
             }
         }
 
-        // A2. IMÁGENES DE REFERENCIA (Los Productos)
-        if (request.referenceImages && request.referenceImages.length > 0) {
-            this.logger.debug(`📸 Adding ${request.referenceImages.length} product reference images...`);
-
+        // Add product reference images
+        if (request.referenceImages?.length) {
+            this.logger.debug(`Adding ${request.referenceImages.length} reference images`);
             for (const productUrl of request.referenceImages) {
                 try {
-                    // Reutilizamos tu lógica de descarga
-                    const productBase64 = await this.resolveImageBase64({ url: productUrl });
+                    const productBase64 = await this.imageResolver.toBase64({ url: productUrl });
                     parts.push({
                         inlineData: { mimeType: 'image/jpeg', data: productBase64 }
                     });
@@ -86,97 +146,28 @@ export class ImagenProvider implements IImageGenerator {
             }
         }
 
-        // B. Añadir el Prompt de Texto
-        parts.push({ text: this.buildPrompt(request) });
+        // Add text prompt
+        parts.push({ text: buildImageGenerationPrompt(request) });
 
-        // 4. Construir el Body para Gemini
-        const body = {
-            contents: [{ role: 'user', parts: parts }],
-            generationConfig: {
-                responseModalities: ["IMAGE"],
-                temperature: 0.4,
-                maxOutputTokens: 8192,
-            },
-            safetySettings: [
-                { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
-                { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
-                { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
-                { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' }
-            ]
-        };
-
-        try {
-            // 5. Llamada REST
-            const response = await axios.post(endpoint, body, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            // 6. Extraer la imagen de la respuesta de Gemini
-            const candidates = response.data.candidates;
-            if (!candidates || candidates.length === 0) throw new Error('No content generated');
-
-            const generatedPart = candidates[0].content.parts[0];
-
-            // Verificamos si realmente nos devolvió una imagen
-            if (!generatedPart.inlineData || !generatedPart.inlineData.data) {
-                this.logger.error('Gemini response:', JSON.stringify(candidates[0]));
-                throw new Error('Gemini returned text instead of image. Verify model supports image generation.');
-            }
-
-            const base64Image = generatedPart.inlineData.data;
-
-            // 7. Subir a Storage
-            const imageUrl = await this.uploadToGcs(base64Image);
-
-            return {
-                imageUrl,
-                metadata: { model: this.MODEL_NAME, generationTimeMs: Date.now() - startTime },
-            };
-
-        } catch (error) {
-            const msg = error.response?.data?.error?.message || error.message;
-            this.logger.error(`❌ Gemini Generation Failed: ${msg}`);
-            throw new Error(`Virtual Staging failed: ${msg}`);
-        }
+        return parts;
     }
 
-    // --- Helpers ---
-
-    private buildPrompt(request: ImageGenerationRequest): string {
-        const hasProducts = request.referenceImages && request.referenceImages.length > 0;
-
-        return `You are an expert interior designer. 
-        
-        INPUTS:
-        - Image 1: The EMPTY ROOM to be furnished.
-        ${hasProducts ? '- Subsequent Images: REAL FURNITURE products to be placed in the room.' : ''}
-        
-        TASK:
-        Generate a photorealistic image of the room fully furnished.
-        
-        STRICT RULES:
-        1. PRESERVE the room's structural integrity (walls, windows, floor, lighting) from Image 1.
-        ${hasProducts ? '2. Use the visual details from the furniture reference images to place them in the room.' : ''}
-        3. ${request.prompt}
-        4. Style: ${request.style || 'Modern'}.
-        5. Output ONLY the final generated image.`;
-    }
-
-    private async resolveImageBase64(input: any): Promise<string> {
-        if (input.key) {
-            const file = this.storage.bucket(this.bucketName).file(input.key);
-            const [buffer] = await file.download();
-            return buffer.toString('base64');
-        } else if (input.url) {
-            const res = await fetch(input.url);
-            if (!res.ok) throw new Error(`Failed to fetch image: ${res.statusText}`);
-            const arrayBuffer = await res.arrayBuffer();
-            return Buffer.from(arrayBuffer).toString('base64');
+    /**
+     * Extracts base64 image from Gemini response.
+     */
+    private extractImageFromResponse(data: any): string {
+        const candidates = data.candidates;
+        if (!candidates?.length) {
+            throw new Error('No content generated');
         }
-        throw new Error('No image source');
+
+        const generatedPart = candidates[0].content.parts[0];
+        if (!generatedPart.inlineData?.data) {
+            this.logger.error('Unexpected response:', JSON.stringify(candidates[0]));
+            throw new Error('Model returned text instead of image. Verify model supports image generation.');
+        }
+
+        return generatedPart.inlineData.data;
     }
 
     private async uploadToGcs(base64: string): Promise<string> {

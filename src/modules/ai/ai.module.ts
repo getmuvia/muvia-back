@@ -3,6 +3,10 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { Product } from '../products/entities/product.entity';
 import { ProductsModule } from '../products/products.module';
 
+// Core utilities
+import { RetryService } from './core/retry';
+import { ImageResolverService } from './core/image';
+
 // Repository
 import { ProductVectorRepository } from './repositories/product-vector.repository';
 
@@ -50,11 +54,19 @@ import { ImagenProvider } from './providers/google/imagen.provider';
     ],
 
     providers: [
+        // Core utilities (shared across providers)
+        RetryService,
+        ImageResolverService,
+
+        // Repository
         ProductVectorRepository,
+
+        // Services
         VectorService,
         EmbeddingService,
         SearchService,
 
+        // AI Providers (Ports & Adapters)
         {
             provide: VISION_PROVIDER,
             useClass: GeminiVisionProvider,
@@ -63,6 +75,8 @@ import { ImagenProvider } from './providers/google/imagen.provider';
             provide: IMAGE_GENERATOR,
             useClass: ImagenProvider,
         },
+
+        // Orchestrators
         VirtualStagingService,
     ],
 

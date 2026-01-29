@@ -1,48 +1,91 @@
 import type { ImageSourceInput } from './vision-provider.interface';
 
 /**
- * Request parameters for image generation.
+ * Request parameters for AI image generation.
+ *
+ * Supports both room staging with reference products and
+ * simple image generation from prompts.
  */
 export interface ImageGenerationRequest {
+    /** Source image (room to be staged) */
     imageSource: ImageSourceInput;
+
+    /** Text prompt describing the desired output */
     prompt: string;
+
+    /** Elements to avoid in the generated image */
     negativePrompt?: string;
+
+    /** URLs of product images to use as visual references */
     referenceImages?: string[];
+
+    /** Output style preset */
     style?: 'photorealistic' | 'artistic' | 'sketch';
 }
 
 /**
- * Result from image generation.
+ * Result from AI image generation.
+ *
+ * Contains the generated image URL and optional metadata
+ * for monitoring and debugging.
  */
 export interface ImageGenerationResult {
+    /** Public URL of the generated image (GCS-hosted) */
     imageUrl: string;
+
+    /** Raw image buffer (optional, for further processing) */
     imageBuffer?: Buffer;
+
+    /** Generation metadata for monitoring */
     metadata?: {
+        /** Model used for generation */
         model: string;
+        /** Time taken to generate in milliseconds */
         generationTimeMs: number;
     };
 }
 
 /**
- * Port interface for image generation providers.
- * Implement this to add support for different AI image generation services.
+ * Port interface for AI image generation providers.
  *
- * @example Google Imagen, OpenAI DALL-E, Stability AI
+ * Implements the Ports & Adapters (Hexagonal) pattern to allow
+ * swapping image generation providers without changing business logic.
+ *
+ * Current implementations:
+ * - ImagenProvider (Google Gemini multimodal)
+ *
+ * Future implementations could include:
+ * - DALL-E (OpenAI)
+ * - Stable Diffusion (Stability AI)
+ * - Midjourney API
+ *
+ * @example
+ * ```typescript
+ * @Inject(IMAGE_GENERATOR)
+ * private readonly imageGenerator: IImageGenerator
+ * ```
  */
 export interface IImageGenerator {
     /**
-     * Generates a staged room image based on the original and prompt.
-     * @param request - Generation parameters including base image and prompt
-     * @returns Generated image URL and optional metadata
+     * Generates a staged room image based on the source image and prompt.
+     *
+     * @param request - Generation parameters including source image, prompt, and references
+     * @returns Generated image URL and metadata
+     * @throws Error if generation fails or model doesn't support image output
      */
     generate(request: ImageGenerationRequest): Promise<ImageGenerationResult>;
 }
 
 /**
  * Injection token for ImageGenerator.
+ *
  * Use this token to inject the image generator in services.
  *
  * @example
- * constructor(@Inject(IMAGE_GENERATOR) private generator: IImageGenerator) {}
+ * ```typescript
+ * constructor(
+ *   @Inject(IMAGE_GENERATOR) private generator: IImageGenerator
+ * ) {}
+ * ```
  */
 export const IMAGE_GENERATOR = Symbol('IMAGE_GENERATOR');

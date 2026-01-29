@@ -11,6 +11,7 @@ import {
     HybridSearchResponse,
 } from '../../interfaces/search-result.interface';
 import { Product } from '../../../products/entities/product.entity';
+import { SEARCH } from '../../constants';
 
 /**
  * Orchestrates semantic and hybrid search operations.
@@ -19,9 +20,6 @@ import { Product } from '../../../products/entities/product.entity';
 @Injectable()
 export class SearchService {
     private readonly logger = new Logger(SearchService.name);
-
-    /** Fetch multiplier to ensure best results aren't missed during merge */
-    private readonly FETCH_MULTIPLIER = 3;
 
     constructor(
         private readonly vectorService: VectorService,
@@ -35,8 +33,8 @@ export class SearchService {
      * Uses a fetch multiplier to ensure the best results aren't missed.
      */
     async searchHybrid(dto: HybridSearchDto): Promise<HybridSearchResponse> {
-        const { query, limit = 10 } = dto;
-        const fetchLimit = limit * this.FETCH_MULTIPLIER;
+        const { query, limit = SEARCH.DEFAULT_LIMIT } = dto;
+        const fetchLimit = limit * SEARCH.FETCH_MULTIPLIER;
 
         // Execute BOTH searches in PARALLEL
         const [semanticResults, lexicalResults] = await Promise.all([
@@ -70,7 +68,7 @@ export class SearchService {
 
         try {
             const embedding = await this.createQueryEmbedding(query);
-            return this.productVectorRepo.findBySimilarity(embedding, limit, 0.3);
+            return this.productVectorRepo.findBySimilarity(embedding, limit, SEARCH.DEFAULT_SIMILARITY_THRESHOLD);
         } catch (error) {
             this.logger.error(`Semantic search failed: ${error.message}`);
             return [];
@@ -119,7 +117,7 @@ export class SearchService {
             const lexicalScore = this.calculateLexicalScore(p, query);
 
             if (existing) {
-                existing.score = Math.min(existing.score + 0.3, 1.0);
+                existing.score = Math.min(existing.score + SEARCH.SCORE_BOOSTS.HYBRID_MATCH, 1.0);
                 existing.matchType = 'hybrid';
             } else {
                 scoreMap.set(p.id, {
@@ -174,11 +172,8 @@ export class SearchService {
             if (regex.test(lowerDesc)) wordsFoundInDesc.add(word);
         });
 
-        const WEIGHT_TITLE = 0.65;
-        const WEIGHT_DESC = 0.35;
-
-        const titleScore = (wordsFoundInTitle.size / uniqueQueryWords.length) * WEIGHT_TITLE;
-        const descScore = (wordsFoundInDesc.size / uniqueQueryWords.length) * WEIGHT_DESC;
+        const titleScore = (wordsFoundInTitle.size / uniqueQueryWords.length) * SEARCH.LEXICAL_WEIGHTS.TITLE;
+        const descScore = (wordsFoundInDesc.size / uniqueQueryWords.length) * SEARCH.LEXICAL_WEIGHTS.DESCRIPTION;
 
         let totalScore = titleScore + descScore;
 
@@ -186,15 +181,15 @@ export class SearchService {
             wordsFoundInTitle.has(w) || wordsFoundInDesc.has(w)
         );
         if (allWordsFound) {
-            totalScore += 0.2;
+            totalScore += SEARCH.SCORE_BOOSTS.ALL_WORDS_FOUND;
         }
 
         if (lowerDesc.includes(cleanQuery)) {
-            totalScore += 0.1;
+            totalScore += SEARCH.SCORE_BOOSTS.PHRASE_IN_DESCRIPTION;
         }
 
         if (lowerTitle.includes(cleanQuery)) {
-            totalScore += 0.15;
+            totalScore += SEARCH.SCORE_BOOSTS.PARTIAL_TITLE_MATCH;
         }
 
         return Math.min(parseFloat(totalScore.toFixed(2)), 1.0);
