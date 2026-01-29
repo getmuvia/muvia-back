@@ -22,34 +22,28 @@ export class VirtualStagingService {
     ) { }
 
     async stageRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
+
         const startTime = Date.now();
-
-        if (!dto.imageKey && !dto.imageUrl) {
-            throw new BadRequestException('Either imageKey or imageUrl must be provided');
-        }
-
+        if (!dto.imageKey && !dto.imageUrl) throw new BadRequestException('Either imageKey or imageUrl must be provided');
         this.logger.log(`Starting virtual staging...`);
 
-        // 1. Analizar Sala
+        // 1. Analizar y Buscar
         const analysis = await this.analyzeRoomWithFallback(dto);
         if (dto.preferredStyle) analysis.style = dto.preferredStyle;
-
-        // 2. Buscar Productos
         const maxProducts = dto.maxProducts ?? 4;
         const allProducts = await this.findMatchingProducts(analysis, maxProducts);
 
-        // 3. 🔥 FILTRADO CRÍTICO: Solo usamos productos con imagen válida para el staging visual
-        // Esto evita que el texto y las imágenes se desfasen
+        // 2. FILTRADO CRÍTICO: Solo productos visuales
         const visualProducts = allProducts
             .filter(p => p.imageUrl && p.imageUrl.startsWith('http'))
-            .slice(0, 3); // Nos quedamos con los 3 mejores QUE TENGAN FOTO
+            .slice(0, 3);
 
-        this.logger.debug(`Selected ${visualProducts.length} products with valid images for generation`);
+        this.logger.debug(`Selected ${visualProducts.length} products for visual reference`);
 
-        // 4. Generar Prompt Sincronizado
+        // 3. Generar el "Super Prompt" (Nueva Lógica)
         const prompt = this.buildGenerationPrompt(analysis, visualProducts);
 
-        // 5. Generar Imagen
+        // 4. Generar Imagen
         const generatedImage = await this.generateImageWithFallback(dto, prompt, visualProducts);
 
         const processingTimeMs = Date.now() - startTime;
@@ -57,16 +51,12 @@ export class VirtualStagingService {
 
         return {
             analysis,
-            suggestedProducts: visualProducts, // Devolvemos los que realmente se usaron
+            suggestedProducts: visualProducts,
             stagedImageUrl: generatedImage.imageUrl,
-            metadata: {
-                processingTimeMs,
-                productsFound: visualProducts.length,
-            },
+            metadata: { processingTimeMs, productsFound: visualProducts.length },
         };
     }
 
-    // ... (analyzeRoomWithFallback se mantiene igual) ...
     private async analyzeRoomWithFallback(dto: VirtualStagingRequestDto): Promise<RoomAnalysisResult> {
         if (dto.imageKey) {
             try {
@@ -84,41 +74,24 @@ export class VirtualStagingService {
     /**
      * Generates image passing the strictly filtered product images.
      */
-    private async generateImageWithFallback(
-        dto: VirtualStagingRequestDto,
-        prompt: string,
-        visualProducts: HybridProductResult[],
-    ) {
-        // Extraemos las URLs limpias (ya sabemos que existen por el filtro anterior)
-        const referenceImages = visualProducts.map(p => p.imageUrl as string);
-
+    private async generateImageWithFallback(dto: VirtualStagingRequestDto, prompt: string, visualProducts: HybridProductResult[]) {
+        const referenceImages: string[] = visualProducts.map(p => p.imageUrl as string);
         const baseRequest = {
             prompt,
             style: 'photorealistic' as const,
-            negativePrompt: 'blurry, distorted, unrealistic, cartoon, drawing, watermark, text, signature',
+            negativePrompt: 'blurry, distorted, unrealistic, cartoon, drawing, watermark, text, signature, different color, wrong furniture',
             referenceImages,
         };
-
-        // Priority 1: Try with imageKey
         if (dto.imageKey) {
             try {
-                return await this.imageGenerator.generate({
-                    ...baseRequest,
-                    imageSource: { key: dto.imageKey },
-                });
+                return await this.imageGenerator.generate({ ...baseRequest, imageSource: { key: dto.imageKey } });
             } catch (error) {
                 this.logger.warn(`imageKey generation failed, trying URL fallback...`);
             }
         }
-
-        // Fallback
-        return await this.imageGenerator.generate({
-            ...baseRequest,
-            imageSource: { url: dto.imageUrl },
-        });
+        return await this.imageGenerator.generate({ ...baseRequest, imageSource: { url: dto.imageUrl } });
     }
 
-    // ... (findMatchingProducts, buildSearchQueries, mergeAndRankProducts se mantienen igual) ...
     private async findMatchingProducts(analysis: RoomAnalysisResult, maxProducts: number): Promise<HybridProductResult[]> {
         const queries = this.buildSearchQueries(analysis);
         const searchResults = await Promise.all(queries.map(query => this.searchService.searchHybrid({ query, limit: 5 })));
@@ -152,38 +125,39 @@ export class VirtualStagingService {
         analysis: RoomAnalysisResult,
         products: HybridProductResult[],
     ): string {
-        // 🔥 MAPEO EXPLÍCITO: Le decimos a la IA qué imagen es cada producto
-        // La Imagen 1 siempre es la Sala.
-        // Por tanto, el producto 0 es la Imagen 2, el producto 1 es la Imagen 3, etc.
+        // Mapeo explícito de imágenes.
+        // SABOTAJE: Usamos solo el título, eliminamos la descripción conflictiva.
         const productInstructions = products
             .map((p, index) => {
-                const imageIndex = index + 2; // +2 porque Image 1 = Sala
-                return `Product #${index + 1} (REFER TO IMAGE ${imageIndex}):
-- Item: ${p.title}
-- Visual Reference: USE IMAGE ${imageIndex} provided in the context.
-- Description: ${p.description || 'Modern furniture style'}
-- Placement: Place naturally in the scene.`;
+                const imageIndex = index + 2; // Image 1 = Sala
+                return `Product #${index + 1}:
+- Type: ${p.title} (e.g., Office Chair, Sofa)
+- VISUAL SOURCE: YOU MUST USE IMAGE ${imageIndex}.
+- INSTRUCTION: Replicate the exact object shown in IMAGE ${imageIndex} (color, shape, materials) and place it realistically in the room.`;
             })
             .join('\n\n');
 
-        return `Create a photorealistic interior design render of this ${analysis.roomType}.
+        return `TASK: Furnish the empty room (Image 1) using the provided product reference images.
 
 CONTEXT:
-- Image 1 provided is the EMPTY ROOM (Base).
-- Subsequent images (Image 2, Image 3...) are the REAL FURNITURE to be placed.
+- Image 1: Empty Room (Base).
+- Image 2, 3, 4...: REAL FURNITURE to be placed.
 
-Design Style: ${analysis.style}
-Color Palette: ${analysis.colorPalette.join(', ')}
+STRICT VISUAL INSTRUCTIONS:
+The text descriptions of the products might be inaccurate. **IGNORE any text descriptions** that contradict the visual evidence in the reference images. 
 
-INSTRUCTIONS:
-You must furnish the room (Image 1) using strictly the following visual references:
+Your primary source of truth for the furniture appearance is **THE PIXELS IN THE REFERENCE IMAGES**.
 
 ${productInstructions}
 
-CRITICAL REQUIREMENTS:
-1. Maintain the room structure (Image 1) exactly (walls, floor, windows).
-2. For each furniture piece listed above, LOOK AT ITS CORRESPONDING REFERENCE IMAGE and transfer its visual appearance (color, material, shape) into the room.
-3. If the reference image is a product shot on white background, blend it realistically into the room lighting and perspective.
-4. Output ONLY the final staged image.`;
+EXECUTION STEPS:
+1. Start with the room in Image 1.
+2. For each Product listed above, look at its designated REFERENCE IMAGE.
+3. visually "cut out" the object from its reference image.
+4. "Paste" it realistically into the room (Image 1), adjusting lighting and shadows to match the scene.
+5. Do NOT change the color or design of the furniture from what is seen in its reference image.
+
+Style: ${analysis.style}
+Output ONLY the final image.`;
     }
 }
