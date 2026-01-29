@@ -14,7 +14,7 @@ import {
 export class ImagenProvider implements IImageGenerator {
     private readonly logger = new Logger(ImagenProvider.name);
     private readonly storage: Storage;
-    
+
     private readonly bucketName: string;
     private readonly projectId: string;
     private readonly location: string;
@@ -23,15 +23,15 @@ export class ImagenProvider implements IImageGenerator {
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
         // Usamos us-central1 por defecto (Gemini multimodal suele estar aquí)
-        this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1'); 
+        this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-        
+
         // 🔥 RECUPERADO: Se lee del .env (GCP_IMAGEN_MODEL)
         // Valor por defecto: 'gemini-2.0-flash-exp' (o puedes poner 'gemini-3-pro-image-preview' en tu .env)
         this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.0-flash-exp');
 
         this.storage = new Storage();
-        
+
         this.logger.log(`✅ ImagenProvider initialized using model: ${this.MODEL_NAME} in ${this.location}`);
     }
 
@@ -69,6 +69,23 @@ export class ImagenProvider implements IImageGenerator {
             }
         }
 
+        // A2. IMÁGENES DE REFERENCIA (Los Productos)
+        if (request.referenceImages && request.referenceImages.length > 0) {
+            this.logger.debug(`📸 Adding ${request.referenceImages.length} product reference images...`);
+
+            for (const productUrl of request.referenceImages) {
+                try {
+                    // Reutilizamos tu lógica de descarga
+                    const productBase64 = await this.resolveImageBase64({ url: productUrl });
+                    parts.push({
+                        inlineData: { mimeType: 'image/jpeg', data: productBase64 }
+                    });
+                } catch (e) {
+                    this.logger.warn(`Failed to load product image ${productUrl}: ${e.message}`);
+                }
+            }
+        }
+
         // B. Añadir el Prompt de Texto
         parts.push({ text: this.buildPrompt(request) });
 
@@ -76,11 +93,9 @@ export class ImagenProvider implements IImageGenerator {
         const body = {
             contents: [{ role: 'user', parts: parts }],
             generationConfig: {
-                // 🔥 ESTO ES CRÍTICO: Le decimos que responda con IMAGEN
-                responseModalities: ["IMAGE"], 
+                responseModalities: ["IMAGE"],
                 temperature: 0.4,
                 maxOutputTokens: 8192,
-                // Opcional: configurar aspect ratio si el modelo lo soporta en config
             },
             safetySettings: [
                 { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
@@ -104,7 +119,7 @@ export class ImagenProvider implements IImageGenerator {
             if (!candidates || candidates.length === 0) throw new Error('No content generated');
 
             const generatedPart = candidates[0].content.parts[0];
-            
+
             // Verificamos si realmente nos devolvió una imagen
             if (!generatedPart.inlineData || !generatedPart.inlineData.data) {
                 this.logger.error('Gemini response:', JSON.stringify(candidates[0]));
@@ -112,7 +127,7 @@ export class ImagenProvider implements IImageGenerator {
             }
 
             const base64Image = generatedPart.inlineData.data;
-            
+
             // 7. Subir a Storage
             const imageUrl = await this.uploadToGcs(base64Image);
 
@@ -131,16 +146,23 @@ export class ImagenProvider implements IImageGenerator {
     // --- Helpers ---
 
     private buildPrompt(request: ImageGenerationRequest): string {
-        // Prompt optimizado para "Staging"
+        const hasProducts = request.referenceImages && request.referenceImages.length > 0;
+
         return `You are an expert interior designer. 
-        Input: The first image provided is an empty room.
-        Task: Generate a photorealistic image of this EXACT room fully furnished.
         
-        Requirements:
-        1. KEEP the room structure, windows, floor, and walls EXACTLY the same.
-        2. ${request.prompt}
-        3. Style: ${request.style || 'Modern'}.
-        4. Output ONLY the generated image.`;
+        INPUTS:
+        - Image 1: The EMPTY ROOM to be furnished.
+        ${hasProducts ? '- Subsequent Images: REAL FURNITURE products to be placed in the room.' : ''}
+        
+        TASK:
+        Generate a photorealistic image of the room fully furnished.
+        
+        STRICT RULES:
+        1. PRESERVE the room's structural integrity (walls, windows, floor, lighting) from Image 1.
+        ${hasProducts ? '2. Use the visual details from the furniture reference images to place them in the room.' : ''}
+        3. ${request.prompt}
+        4. Style: ${request.style || 'Modern'}.
+        5. Output ONLY the final generated image.`;
     }
 
     private async resolveImageBase64(input: any): Promise<string> {
@@ -161,12 +183,12 @@ export class ImagenProvider implements IImageGenerator {
         const buffer = Buffer.from(base64, 'base64');
         const filename = `generated/staging-${uuidv4()}.png`;
         const file = this.storage.bucket(this.bucketName).file(filename);
-        
-        await file.save(buffer, { 
-            contentType: 'image/png', 
-            metadata: { cacheControl: 'public, max-age=31536000' } 
+
+        await file.save(buffer, {
+            contentType: 'image/png',
+            metadata: { cacheControl: 'public, max-age=31536000' }
         });
-        
+
         return `https://storage.googleapis.com/${this.bucketName}/${filename}`;
     }
 }

@@ -9,7 +9,6 @@ import type { VirtualStagingResponseDto, VirtualStagingRequestDto } from '../../
 
 /**
  * Orchestrates the virtual staging workflow.
- * 
  */
 @Injectable()
 export class VirtualStagingService {
@@ -48,7 +47,9 @@ export class VirtualStagingService {
         const products = await this.findMatchingProducts(analysis, maxProducts);
 
         const prompt = this.buildGenerationPrompt(analysis, products);
-        const generatedImage = await this.generateImageWithFallback(dto, prompt);
+
+        // 🔥 ACTUALIZADO: Pasamos los productos reales para usar sus imágenes
+        const generatedImage = await this.generateImageWithFallback(dto, prompt, products);
 
         const processingTimeMs = Date.now() - startTime;
         this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
@@ -71,7 +72,6 @@ export class VirtualStagingService {
      * 3. If both fail or no fallback available, throw error
      */
     private async analyzeRoomWithFallback(dto: VirtualStagingRequestDto): Promise<RoomAnalysisResult> {
-
         if (dto.imageKey) {
             try {
                 this.logger.debug(`Analyzing room via imageKey: ${dto.imageKey}`);
@@ -95,15 +95,24 @@ export class VirtualStagingService {
 
     /**
      * Generates image with fallback strategy (same as analyzeRoom).
+     * NOW supports reference images from products.
      */
     private async generateImageWithFallback(
         dto: VirtualStagingRequestDto,
         prompt: string,
+        products: HybridProductResult[],
     ) {
+        // 🔥 CORRECCIÓN TYPESCRIPT: Forzamos el tipo string[] eliminando nulos explícitamente
+        const referenceImages: string[] = products
+            .map(p => p.imageUrl)
+            .filter((url): url is string => typeof url === 'string' && url.length > 0)
+            .slice(0, 3);
+
         const baseRequest = {
             prompt,
             style: 'photorealistic' as const,
-            negativePrompt: 'blurry, distorted, unrealistic, cartoon, drawing',
+            negativePrompt: 'blurry, distorted, unrealistic, cartoon, drawing, watermark, text, signature',
+            referenceImages,
         };
 
         // Priority 1: Try with imageKey
@@ -171,11 +180,8 @@ export class VirtualStagingService {
         const { suggestedFurniture, style, colorPalette } = analysis;
         const primaryColor = colorPalette[0] || '';
 
-        // Added LOG to see what we are suppressing
-        this.logger.debug(`Generating search queries for ${suggestedFurniture.length} items (Process limited to top 3 to save quota)`);
+        this.logger.debug(`Generating search queries for ${suggestedFurniture.length} items`);
 
-        // Create contextual queries for each furniture piece
-        // REDUCED LIMIT from 5 to 3 to avoid burst quota issues
         return suggestedFurniture.slice(0, 3).map(furniture => {
             return `${furniture} ${style} ${primaryColor}`.trim();
         });
@@ -215,8 +221,8 @@ export class VirtualStagingService {
         products: HybridProductResult[],
     ): string {
         const productDescriptions = products
-            .slice(0, 3) // Limit to avoid token overflow
-            .map(p => `- ${p.title}`)
+            .slice(0, 3)
+            .map(p => `- ${p.title}: ${p.description || ''}`)
             .join('\n');
 
         return `Create a photorealistic interior design render of this ${analysis.roomType}.
@@ -226,13 +232,14 @@ Color Palette: ${analysis.colorPalette.join(', ')}
 
 Place furniture naturally in these areas: ${analysis.emptyAreas.join(', ')}
 
-Include these REAL products from our catalog:
+The user has selected these specific REAL products to be placed in the room (reference images provided):
 ${productDescriptions}
 
 Requirements:
-- Maintain the original room's architecture, windows, and lighting
-- Photorealistic quality suitable for e-commerce
-- Natural furniture placement with proper scale
-- Cohesive design that matches the ${analysis.style} aesthetic`;
+- Maintain the original room's architecture, windows, and lighting from the first image.
+- USE THE VISUAL STYLE AND COLOR of the provided product reference images for the furniture.
+- Photorealistic quality suitable for e-commerce.
+- Natural furniture placement with proper scale.
+- Cohesive design that matches the ${analysis.style} aesthetic.`;
     }
 }
