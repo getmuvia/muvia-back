@@ -7,6 +7,7 @@ export interface ImageGenerationRequest {
     imageSource: ImageSourceInput;
     prompt: string;
     negativePrompt?: string;
+    referenceImages?: string[];
     style?: 'photorealistic' | 'artistic' | 'sketch';
 }
 
