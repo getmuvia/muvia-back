@@ -13,7 +13,7 @@ import {
 @Controller('ai/virtual-staging')
 @UseGuards(JwtAuthGuard)
 export class VirtualStagingController {
-    constructor(private readonly stagingService: VirtualStagingService) {}
+    constructor(private readonly stagingService: VirtualStagingService) { }
 
     /**
      * POST /ai/virtual-staging
@@ -24,10 +24,10 @@ export class VirtualStagingController {
      * @returns Staged image URL and suggested products
      * 
      * @example
-     * // Using internal storage key (recommended)
+     * 
      * { "imageKey": "virtual-staging/temp/123.jpg" }
      * 
-     * // Using external URL
+     * 
      * { "imageUrl": "https://example.com/room.jpg" }
      */
     @Post()

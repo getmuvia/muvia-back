@@ -6,6 +6,8 @@ import {
     RoomAnalysisResult,
     ImageSourceInput,
 } from '../../interfaces/vision-provider.interface';
+import { RetryService, ImageResolverService } from '../../core';
+import { ROOM_ANALYSIS_PROMPT } from '../../prompts';
 
 /**
  * Google Gemini Vision implementation of IVisionProvider.
@@ -20,15 +22,15 @@ export class GeminiVisionProvider implements IVisionProvider {
     private readonly logger = new Logger(GeminiVisionProvider.name);
     private readonly vertexAI: VertexAI;
     private readonly model: GenerativeModel;
-    private readonly bucketName: string;
-
     private readonly MODEL_NAME: string;
 
-    constructor(private readonly configService: ConfigService) {
+    constructor(
+        private readonly configService: ConfigService,
+        private readonly retryService: RetryService,
+        private readonly imageResolver: ImageResolverService,
+    ) {
         const projectId = this.configService.get<string>('GCP_PROJECT_ID');
         const location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
-        this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-
         this.MODEL_NAME = this.configService.get<string>('GCP_GEMINI_MODEL', 'gemini-1.5-pro');
 
         if (!projectId) {
@@ -43,32 +45,28 @@ export class GeminiVisionProvider implements IVisionProvider {
     }
 
     async analyzeRoom(input: ImageSourceInput): Promise<RoomAnalysisResult> {
-        if (!input.key && !input.url) {
-            throw new BadRequestException('Either imageKey or imageUrl must be provided');
-        }
+        this.imageResolver.validateSource(input);
 
-        const imagePart = await this.resolveImagePart(input);
-        const prompt = this.buildAnalysisPrompt();
-
+        const imagePart = await this.imageResolver.toGeminiPart(input);
         this.logger.debug(`Analyzing room image via ${input.key ? 'gs://' : 'URL download'}...`);
 
         try {
-            // Wrap API call in retry logic for 429/Quota errors
-            const response = await this.retryWithBackoff(async () => {
-                return this.model.generateContent({
+            const response = await this.retryService.withExponentialBackoff(
+                () => this.model.generateContent({
                     contents: [
                         {
                             role: 'user',
-                            parts: [imagePart, { text: prompt }],
+                            parts: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }],
                         },
                     ],
-                    generationConfig: {
-                        temperature: 0.2,
-                        maxOutputTokens: 8192,
-                        responseMimeType: 'application/json',
-                    },
-                });
-            });
+                    generationConfig: ROOM_ANALYSIS_PROMPT.generationConfig,
+                }),
+                {
+                    operationName: `Gemini Vision (${this.MODEL_NAME})`,
+                    isRetryable: (err) => this.retryService.isQuotaExceededError(err),
+                    initialDelayMs: 2000,
+                },
+            );
 
             const result = response.response;
             const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -85,135 +83,8 @@ export class GeminiVisionProvider implements IVisionProvider {
     }
 
     /**
-     * Retries an operation if it encounters a 429 error.
-     * Uses exponential backoff strategy.
+     * Parses Gemini JSON response into RoomAnalysisResult.
      */
-    private async retryWithBackoff<T>(
-        operation: () => Promise<T>,
-        maxRetries: number = 3,
-        initialDelay: number = 2000,
-    ): Promise<T> {
-        let retries = 0;
-        while (true) {
-            try {
-                return await operation();
-            } catch (error) {
-                if (!this.isRetryableError(error) || retries >= maxRetries) {
-                    throw error;
-                }
-
-                const delay = initialDelay * Math.pow(2, retries);
-                this.logger.warn(`Quota exceeded (429) for model ${this.MODEL_NAME}. Retrying in ${delay}ms... (Attempt ${retries + 1}/${maxRetries})`);
-
-                await new Promise(resolve => setTimeout(resolve, delay));
-                retries++;
-            }
-        }
-    }
-
-    /**
-     * Determines if an error is a 429 Quota Exceeded error.
-     */
-    private isRetryableError(error: any): boolean {
-        if (error?.code === 429) return true;
-        if (error?.status === 429 || error?.status === 'RESOURCE_EXHAUSTED') return true;
-
-        const message = error?.message || '';
-        if (message.includes('429') || message.includes('Quota exceeded') || message.includes('RESOURCE_EXHAUSTED')) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * Resolves image input to a Gemini-compatible Part.
-     * Priority: key (gs://) > url (download)
-     */
-    private async resolveImagePart(input: ImageSourceInput): Promise<Part> {
-
-        if (input.key) {
-            const gsUri = `gs://${this.bucketName}/${input.key}`;
-            const mimeType = this.inferMimeType(input.key);
-
-            this.logger.debug(`Using native GCS reference: ${gsUri}`);
-
-            return {
-                fileData: {
-                    fileUri: gsUri,
-                    mimeType,
-                },
-            };
-        }
-
-        if (input.url) {
-            this.logger.debug(`Downloading external image: ${input.url}`);
-
-            const { buffer, mimeType } = await this.downloadImage(input.url);
-
-            return {
-                inlineData: {
-                    mimeType,
-                    data: buffer.toString('base64'),
-                },
-            };
-        }
-
-        throw new BadRequestException('No valid image source provided');
-    }
-
-    /**
-     * Downloads an image from external URL.
-     */
-    private async downloadImage(url: string): Promise<{ buffer: Buffer; mimeType: string }> {
-        try {
-            const response = await fetch(url);
-
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-            }
-
-            const contentType = response.headers.get('content-type') || 'image/jpeg';
-            const arrayBuffer = await response.arrayBuffer();
-
-            return {
-                buffer: Buffer.from(arrayBuffer),
-                mimeType: contentType.split(';')[0],
-            };
-        } catch (error) {
-            this.logger.error(`Failed to download image from ${url}: ${error.message}`);
-            throw new BadRequestException(`Cannot download image: ${error.message}`);
-        }
-    }
-
-    /**
-     * Infers MIME type from file extension.
-     */
-    private inferMimeType(key: string): string {
-        const ext = key.split('.').pop()?.toLowerCase();
-        const mimeTypes: Record<string, string> = {
-            jpg: 'image/jpeg',
-            jpeg: 'image/jpeg',
-            png: 'image/png',
-            webp: 'image/webp',
-            gif: 'image/gif',
-        };
-        return mimeTypes[ext || ''] || 'image/jpeg';
-    }
-
-    private buildAnalysisPrompt(): string {
-        return `Analyze this room image for virtual furniture staging. 
-        
-Identify and return a JSON object with:
-- roomType: The type of room (living room, bedroom, dining room, office, kitchen, bathroom, etc.)
-- style: The current or suggested design style (modern, minimalist, rustic, industrial, scandinavian, bohemian, traditional, contemporary)
-- emptyAreas: Array of areas where furniture could be placed (e.g., "center", "left corner", "near window", "against wall")
-- suggestedFurniture: Array of furniture pieces that would fit well (be specific: "3-seater sofa", "round coffee table", "floor lamp", etc.)
-- colorPalette: Array of colors that match the room (e.g., "beige", "warm gray", "oak wood", "navy blue")
-
-Return ONLY valid JSON, no markdown or explanations.`;
-    }
-
     private parseResponse(text: string): RoomAnalysisResult {
         try {
             const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();

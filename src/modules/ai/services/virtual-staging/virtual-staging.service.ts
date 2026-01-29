@@ -6,7 +6,19 @@ import { IMAGE_GENERATOR } from '../../interfaces/image-generator.interface';
 import { SearchService } from '../search/search.service';
 import type { HybridProductResult } from '../../interfaces/search-result.interface';
 import type { VirtualStagingResponseDto, VirtualStagingRequestDto } from '../../dto/virtual-staging.dto';
+import { buildStagingPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
+import { VIRTUAL_STAGING } from '../../constants';
 
+/**
+ * Virtual Staging Service
+ *
+ * Orchestrates the complete virtual staging workflow:
+ * 1. Room Analysis - Uses vision AI to analyze the room image
+ * 2. Product Matching - Finds relevant products from catalog
+ * 3. Image Generation - Creates staged room with products
+ *
+ * Uses Ports & Adapters pattern for AI provider flexibility.
+ */
 @Injectable()
 export class VirtualStagingService {
     private readonly logger = new Logger(VirtualStagingService.name);
@@ -21,30 +33,33 @@ export class VirtualStagingService {
         private readonly searchService: SearchService,
     ) { }
 
-    async stageRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
-
+    /**
+     * Generates a staged room image with product recommendations.
+     *
+     * @param dto - Request with image source and preferences
+     * @returns Staged image URL, room analysis, and product suggestions
+     * @throws BadRequestException if no image source is provided
+     */
+    async generateStagedRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
         const startTime = Date.now();
-        if (!dto.imageKey && !dto.imageUrl) throw new BadRequestException('Either imageKey or imageUrl must be provided');
+
+        this.validateImageSource(dto);
         this.logger.log(`Starting virtual staging...`);
 
-        // 1. Analizar y Buscar
-        const analysis = await this.analyzeRoomWithFallback(dto);
+        // 1. Analyze room and find matching products
+        const analysis = await this.analyzeRoomWithUrlFallback(dto);
         if (dto.preferredStyle) analysis.style = dto.preferredStyle;
-        const maxProducts = dto.maxProducts ?? 4;
+
+        const maxProducts = dto.maxProducts ?? VIRTUAL_STAGING.DEFAULT_MAX_PRODUCTS;
         const allProducts = await this.findMatchingProducts(analysis, maxProducts);
 
-        // 2. FILTRADO CRÍTICO: Solo productos visuales
-        const visualProducts = allProducts
-            .filter(p => p.imageUrl && p.imageUrl.startsWith('http'))
-            .slice(0, 3);
-
+        // 2. Filter to products with valid image URLs for visual reference
+        const visualProducts = this.filterVisualProducts(allProducts);
         this.logger.debug(`Selected ${visualProducts.length} products for visual reference`);
 
-        // 3. Generar el "Super Prompt" (Nueva Lógica)
-        const prompt = this.buildGenerationPrompt(analysis, visualProducts);
-
-        // 4. Generar Imagen
-        const generatedImage = await this.generateImageWithFallback(dto, prompt, visualProducts);
+        // 3. Generate staged image using prompt builder
+        const prompt = this.buildPromptForStaging(analysis, visualProducts);
+        const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, visualProducts);
 
         const processingTimeMs = Date.now() - startTime;
         this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
@@ -57,54 +72,148 @@ export class VirtualStagingService {
         };
     }
 
-    private async analyzeRoomWithFallback(dto: VirtualStagingRequestDto): Promise<RoomAnalysisResult> {
-        if (dto.imageKey) {
-            try {
-                this.logger.debug(`Analyzing room via imageKey: ${dto.imageKey}`);
-                return await this.visionProvider.analyzeRoom({ key: dto.imageKey });
-            } catch (error) {
-                this.logger.warn(`imageKey failed: ${error.message}`);
-                if (dto.imageUrl) return await this.visionProvider.analyzeRoom({ url: dto.imageUrl });
-                throw error;
-            }
-        }
-        return await this.visionProvider.analyzeRoom({ url: dto.imageUrl });
+    /**
+     * @deprecated Use generateStagedRoom instead. Kept for backward compatibility.
+     */
+    async stageRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
+        return this.generateStagedRoom(dto);
     }
 
     /**
-     * Generates image passing the strictly filtered product images.
+     * Validates that at least one image source is provided.
      */
-    private async generateImageWithFallback(dto: VirtualStagingRequestDto, prompt: string, visualProducts: HybridProductResult[]) {
+    private validateImageSource(dto: VirtualStagingRequestDto): void {
+        const gcsKey = dto.gcsStorageKey ?? dto.imageKey;
+        const externalUrl = dto.externalImageUrl ?? dto.imageUrl;
+
+        if (!gcsKey && !externalUrl) {
+            throw new BadRequestException('Either gcsStorageKey/imageKey or externalImageUrl/imageUrl must be provided');
+        }
+    }
+
+    /**
+     * Gets the effective GCS key from DTO (supports legacy field names).
+     */
+    private getGcsKey(dto: VirtualStagingRequestDto): string | undefined {
+        return dto.gcsStorageKey ?? dto.imageKey;
+    }
+
+    /**
+     * Gets the effective external URL from DTO (supports legacy field names).
+     */
+    private getExternalUrl(dto: VirtualStagingRequestDto): string | undefined {
+        return dto.externalImageUrl ?? dto.imageUrl;
+    }
+
+    /**
+     * Filters products to only those with valid HTTP/HTTPS image URLs.
+     */
+    private filterVisualProducts(products: HybridProductResult[]): HybridProductResult[] {
+        return products
+            .filter(p => p.imageUrl && (p.imageUrl.startsWith('http://') || p.imageUrl.startsWith('https://')))
+            .slice(0, VIRTUAL_STAGING.MAX_REFERENCE_IMAGES);
+    }
+
+    /**
+     * Builds the staging prompt using the centralized prompt builder.
+     */
+    private buildPromptForStaging(
+        analysis: RoomAnalysisResult,
+        products: HybridProductResult[],
+    ): string {
+        return buildStagingPrompt({
+            analysis,
+            products: products.map((p, index) => ({ title: p.title, index })),
+            hasReferenceImages: products.length > 0,
+        });
+    }
+
+    /**
+     * Analyzes the room image, falling back to URL if GCS key fails.
+     */
+    private async analyzeRoomWithUrlFallback(dto: VirtualStagingRequestDto): Promise<RoomAnalysisResult> {
+        const gcsKey = this.getGcsKey(dto);
+        const externalUrl = this.getExternalUrl(dto);
+
+        if (gcsKey) {
+            try {
+                this.logger.debug(`Analyzing room via GCS key: ${gcsKey}`);
+                return await this.visionProvider.analyzeRoom({ key: gcsKey });
+            } catch (error) {
+                this.logger.warn(`GCS key analysis failed: ${error.message}`);
+                if (externalUrl) {
+                    this.logger.debug(`Falling back to URL analysis`);
+                    return await this.visionProvider.analyzeRoom({ url: externalUrl });
+                }
+                throw error;
+            }
+        }
+        return await this.visionProvider.analyzeRoom({ url: externalUrl });
+    }
+
+    /**
+     * Generates staged image, with URL fallback if GCS key fails.
+     */
+    private async generateImageWithUrlFallback(
+        dto: VirtualStagingRequestDto,
+        prompt: string,
+        visualProducts: HybridProductResult[],
+    ) {
+        const gcsKey = this.getGcsKey(dto);
+        const externalUrl = this.getExternalUrl(dto);
+
         const referenceImages: string[] = visualProducts.map(p => p.imageUrl as string);
         const baseRequest = {
             prompt,
             style: 'photorealistic' as const,
-            negativePrompt: 'blurry, distorted, unrealistic, cartoon, drawing, watermark, text, signature, different color, wrong furniture',
+            negativePrompt: STAGING_GENERATION_CONFIG.defaultNegativePrompt,
             referenceImages,
         };
-        if (dto.imageKey) {
+
+        if (gcsKey) {
             try {
-                return await this.imageGenerator.generate({ ...baseRequest, imageSource: { key: dto.imageKey } });
+                return await this.imageGenerator.generate({ ...baseRequest, imageSource: { key: gcsKey } });
             } catch (error) {
-                this.logger.warn(`imageKey generation failed, trying URL fallback...`);
+                this.logger.warn(`GCS key generation failed, falling back to URL...`);
             }
         }
-        return await this.imageGenerator.generate({ ...baseRequest, imageSource: { url: dto.imageUrl } });
+        return await this.imageGenerator.generate({ ...baseRequest, imageSource: { url: externalUrl } });
     }
 
-    private async findMatchingProducts(analysis: RoomAnalysisResult, maxProducts: number): Promise<HybridProductResult[]> {
+    /**
+     * Finds products matching the room analysis.
+     */
+    private async findMatchingProducts(
+        analysis: RoomAnalysisResult,
+        maxProducts: number,
+    ): Promise<HybridProductResult[]> {
         const queries = this.buildSearchQueries(analysis);
-        const searchResults = await Promise.all(queries.map(query => this.searchService.searchHybrid({ query, limit: 5 })));
+        const searchResults = await Promise.all(
+            queries.map(query => this.searchService.searchHybrid({ query, limit: VIRTUAL_STAGING.SEARCH_RESULTS_PER_QUERY })),
+        );
         return this.mergeAndRankProducts(searchResults, maxProducts);
     }
 
+    /**
+     * Builds search queries from room analysis.
+     * Combines furniture type with style and primary color.
+     */
     private buildSearchQueries(analysis: RoomAnalysisResult): string[] {
         const { suggestedFurniture, style, colorPalette } = analysis;
         const primaryColor = colorPalette[0] || '';
-        return suggestedFurniture.slice(0, 3).map(furniture => `${furniture} ${style} ${primaryColor}`.trim());
+        return suggestedFurniture
+            .slice(0, VIRTUAL_STAGING.MAX_FURNITURE_QUERIES)
+            .map(furniture => `${furniture} ${style} ${primaryColor}`.trim());
     }
 
-    private mergeAndRankProducts(searchResults: Array<{ results: HybridProductResult[] }>, maxProducts: number): HybridProductResult[] {
+    /**
+     * Merges and ranks products from multiple search results.
+     * Removes duplicates and sorts by score.
+     */
+    private mergeAndRankProducts(
+        searchResults: Array<{ results: HybridProductResult[] }>,
+        maxProducts: number,
+    ): HybridProductResult[] {
         const seen = new Set<string>();
         const merged: HybridProductResult[] = [];
         for (const result of searchResults) {
@@ -116,63 +225,5 @@ export class VirtualStagingService {
             }
         }
         return merged.sort((a, b) => b.score - a.score).slice(0, maxProducts);
-    }
-
-    /**
-     * Build prompt with EXPLICIT IMAGE MAPPING.
-     */
-    private buildGenerationPrompt(
-        analysis: RoomAnalysisResult,
-        products: HybridProductResult[],
-    ): string {
-        const productInstructions = products
-            .map((p, index) => {
-                const imageIndex = index + 2;
-                // AQUÍ ESTÁ LA CLAVE: Instrucciones dinámicas según el tipo de mueble
-                return `Product #${index + 1}:
-- Item: ${p.title}
-- REFERENCE SOURCE: Use IMAGE ${imageIndex} strictly for MATERIALS and COLOR.
-- POSITIONING RULES: 
-  * If it's a SEATING (chair, sofa): Arrange it facing the center or a focal point.
-  * If it's STORAGE (wardrobe, bookshelf, cabinet): ALIGN IT AGAINST A WALL. Do not obstruct pathways.
-  * If it's a TABLE (dining, coffee): Place it centrally relative to seating or the room.
-  * If it's a RUG: Place it on the floor, anchoring the furniture group.
-- GEOMETRY: Rotate the 3D model of the object to match the room's perspective perfectly.`;
-            })
-            .join('\n\n');
-
-        return `TASK: Act as an expert 3D Interior Designer. Furnish the empty room (Image 1) creating a realistic, lived-in scene.
-
-CONTEXT:
-- Image 1: The Base Room (Perspective and lighting reference).
-- Subsequent Images: The Furniture Catalogue (Material and Design reference).
-
-INSTRUCTIONS FOR "SMART STAGING":
-
-1. **ANALYZE THE PERSPECTIVE:** Look at the floor lines and walls of Image 1. All inserted furniture MUST align with these vanishing points.
-
-2. **PLACE THE KEY PRODUCTS (INTELLIGENTLY):**
-${productInstructions}
-
-   **CRITICAL RULE FOR PRODUCTS:** - You MUST keep the visual identity (Color, Fabric, Style) from the reference images.
-   - BUT you MUST CHANGE the 3D rotation and angle to match the new position in the room.
-
-3. **CREATE THE SCENE (CONTEXTUAL FILL):**
-   - Don't just leave the products isolated. Create a logical environment for them.
-   - **For Seating:** Generate appropriate tables or complementary seating nearby.
-   - **For Tables:** Add centerpieces, chairs, or placement settings.
-   - **For Storage/Shelves:** Add books, plants, or decor items inside/on top to make it look used.
-   - **For Bedroom items:** Ensure proper orientation relative to the "bed" wall.
-   
-   Add ambient decor: Plants, lamps, art, and soft shadows to ground the objects.
-
-STRICT CONSTRAINTS:
-- ✅ YES: Rotate objects, change perspective, create supporting furniture.
-- ✅ YES: Add decoration (plants, rugs) to make it cozy.
-- ❌ NO: Do NOT change the architectural shell (walls/windows) of Image 1.
-- ❌ NO: Do NOT change the COLOR or MATERIAL of the Key Products.
-
-Style: ${analysis.style}. Lighting: Natural and soft.
-Output ONLY the final image.`;
     }
 }

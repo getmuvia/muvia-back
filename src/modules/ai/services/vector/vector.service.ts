@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PredictionServiceClient, helpers, protos } from '@google-cloud/aiplatform';
+import { RetryService } from '../../core/retry';
 
 export type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
 
@@ -15,7 +16,10 @@ export class VectorService implements OnModuleInit {
     private readonly EMBEDDING_MODEL = 'text-embedding-004';
     private readonly DEFAULT_LOCATION = 'us-central1';
 
-    constructor(private readonly configService: ConfigService) { }
+    constructor(
+        private readonly configService: ConfigService,
+        private readonly retryService: RetryService,
+    ) { }
 
     onModuleInit(): void {
         this.initialize();
@@ -38,59 +42,29 @@ export class VectorService implements OnModuleInit {
         }
 
         try {
-            // Apply retry logic for 429s
-            return await this.retryWithBackoff(async () => {
-                const [response] = await this.client.predict({
-                    endpoint: endpointResourceName,
-                    instances: [instanceValue as any],
-                });
-
-                return this.extractEmbeddingFromResponse(response);
-            });
-
+            // Apply retry logic for 429s using RetryService
+            return await this.retryService.withExponentialBackoff(
+                async () => {
+                    const [response] = await this.client.predict({
+                        endpoint: endpointResourceName,
+                        instances: [instanceValue as any],
+                    });
+                    return this.extractEmbeddingFromResponse(response);
+                },
+                {
+                    operationName: `Vertex AI Embeddings (${this.EMBEDDING_MODEL})`,
+                    isRetryable: (err) => this.retryService.isQuotaExceededError(err),
+                },
+            );
         } catch (error) {
             this.logger.error(`Vertex AI Prediction failed: ${error.message}`);
             throw new InternalServerErrorException(`Embedding generation failed: ${error.message}`);
         }
     }
 
-    private async retryWithBackoff<T>(
-        operation: () => Promise<T>,
-        maxRetries: number = 3,
-        initialDelay: number = 1000,
-    ): Promise<T> {
-        let retries = 0;
-        while (true) {
-            try {
-                return await operation();
-            } catch (error) {
-                if (!this.isRetryableError(error) || retries >= maxRetries) {
-                    throw error;
-                }
-
-                const delay = initialDelay * Math.pow(2, retries);
-                this.logger.warn(`Quota 429 on Embeddings. Retrying in ${delay}ms... (Attempt ${retries + 1})`);
-
-                await new Promise(resolve => setTimeout(resolve, delay));
-                retries++;
-            }
-        }
-    }
-
-    private isRetryableError(error: any): boolean {
-        // Vertex AI gRPC errors often typically have code 8 (RESOURCE_EXHAUSTED) or 14 (UNAVAILABLE)
-        if (error?.code === 8 || error?.code === 429) return true;
-        if (error?.message?.includes('429') || error?.message?.includes('Quota') || error?.message?.includes('Resource exhausted')) return true;
-        return false;
-    }
-
     toVectorString(embedding: number[]): string {
         return JSON.stringify(embedding);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Private Helper Methods
-    // ─────────────────────────────────────────────────────────────────────────
 
     private initialize(): void {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
