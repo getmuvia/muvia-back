@@ -125,39 +125,43 @@ export class VirtualStagingService {
         analysis: RoomAnalysisResult,
         products: HybridProductResult[],
     ): string {
-        // Mapeo explícito de imágenes.
-        // SABOTAJE: Usamos solo el título, eliminamos la descripción conflictiva.
         const productInstructions = products
             .map((p, index) => {
-                const imageIndex = index + 2; // Image 1 = Sala
+                const imageIndex = index + 2;
                 return `Product #${index + 1}:
-- Type: ${p.title} (e.g., Office Chair, Sofa)
-- VISUAL SOURCE: YOU MUST USE IMAGE ${imageIndex}.
-- INSTRUCTION: Replicate the exact object shown in IMAGE ${imageIndex} (color, shape, materials) and place it realistically in the room.`;
+- Type: ${p.title}
+- VISUAL SOURCE: IMAGE ${imageIndex}.
+- INSTRUCTION: Place this EXACT object (same color/shape) as the centerpiece.`;
             })
             .join('\n\n');
 
-        return `TASK: Furnish the empty room (Image 1) using the provided product reference images.
+        // 🔥 CAMBIOS CLAVE AQUÍ ABAJO:
+        return `TASK: Create a fully furnished and DECORATED interior design based on the empty room (Image 1).
 
 CONTEXT:
-- Image 1: Empty Room (Base).
-- Image 2, 3, 4...: REAL FURNITURE to be placed.
+- Image 1: Base Room structure.
+- Image 2, 3...: KEY FURNITURE pieces that MUST be included.
 
-STRICT VISUAL INSTRUCTIONS:
-The text descriptions of the products might be inaccurate. **IGNORE any text descriptions** that contradict the visual evidence in the reference images. 
-
-Your primary source of truth for the furniture appearance is **THE PIXELS IN THE REFERENCE IMAGES**.
-
+INSTRUCTIONS:
+1. **CORE FURNITURE:** Place the Key Furniture pieces listed below. You MUST use their exact visual appearance from the reference images.
 ${productInstructions}
 
-EXECUTION STEPS:
-1. Start with the room in Image 1.
-2. For each Product listed above, look at its designated REFERENCE IMAGE.
-3. visually "cut out" the object from its reference image.
-4. "Paste" it realistically into the room (Image 1), adjusting lighting and shadows to match the scene.
-5. Do NOT change the color or design of the furniture from what is seen in its reference image.
+2. **COMPLEMENTARY DECOR (CRITICAL):** - You act as a professional interior designer. DO NOT just place the furniture in an empty room.
+   - **FILL THE VOIDS:** Add stylistic decor elements that match the '${analysis.style}' style to make the room feel lived-in and cozy.
+   - **ADD:** Rugs, plants, wall art, lamps, books, cushions, curtains, and small accessories.
+   - **COHERENCE:** The new decor must match the color palette (${analysis.colorPalette.join(', ')}).
 
-Style: ${analysis.style}
+3. **SCENE COMPOSITION:**
+   - Arrange the Key Furniture (Images 2+) in the best layout for this room type.
+   - Integrate the decor naturally around them (e.g., a rug under the chair, a plant in the corner, art on the walls).
+
+STRICT CONSTRAINTS:
+- ✅ YES: Add plants, rugs, art, lighting, and accessories.
+- ✅ YES: Change the lighting mood to be inviting.
+- ❌ NO: Do NOT change the walls, floor material, windows, or structural layout of Image 1.
+- ❌ NO: Do NOT change the color or shape of the Key Furniture (Images 2+).
+
+Style: ${analysis.style} (High-end Magazine Quality).
 Output ONLY the final image.`;
     }
 }
