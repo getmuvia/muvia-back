@@ -31,14 +31,14 @@ export class VirtualStagingRequestDto {
      *
      * @example "virtual-staging/temp/abc123.jpg"
      */
-    @ValidateIf((o) => !o.imageUrl && !o.externalImageUrl)
+    @IsOptional()
     @IsString()
     gcsStorageKey?: string;
 
     /**
      * @deprecated Use `gcsStorageKey` instead. Kept for backward compatibility.
      */
-    @ValidateIf((o) => !o.gcsStorageKey && !o.imageUrl && !o.externalImageUrl)
+    @IsOptional()
     @IsString()
     imageKey?: string;
 
@@ -48,14 +48,14 @@ export class VirtualStagingRequestDto {
      *
      * @example "https://example.com/room.jpg"
      */
-    @ValidateIf((o) => !o.gcsStorageKey && !o.imageKey)
+    @IsOptional()
     @IsUrl()
     externalImageUrl?: string;
 
     /**
      * @deprecated Use `externalImageUrl` instead. Kept for backward compatibility.
      */
-    @ValidateIf((o) => !o.gcsStorageKey && !o.imageKey && !o.externalImageUrl)
+    @IsOptional()
     @IsUrl()
     imageUrl?: string;
 
