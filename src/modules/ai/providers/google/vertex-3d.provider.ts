@@ -28,8 +28,8 @@ export class Vertex3DProvider implements IScan3DProvider {
         // Especificaciones del Hardware (Usando tu cuota T4)
         const workerPoolSpecs = [{
             machineSpec: {
-                machineType: 'n1-standard-4',
-                acceleratorType: 'NVIDIA_TESLA_T4',
+                machineType: 'g2-standard-4',
+                acceleratorType: 'NVIDIA_L4',
                 acceleratorCount: 1,
             },
             replicaCount: 1,
