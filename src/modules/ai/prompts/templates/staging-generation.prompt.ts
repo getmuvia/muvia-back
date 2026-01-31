@@ -28,18 +28,14 @@ export interface StagingPromptContext {
  * Includes explicit rules for placement and scale.
  */
 function buildProductInstruction(product: { title: string; index: number }): string {
-    const imageIndex = product.index + 2; // Image 1 is the room, products start at Image 2
+    const imageIndex = product.index + 2;
 
-    return `PRODUCT #${product.index + 1} (PRIORITY ITEM):
-- Name: ${product.title}
-- VISUAL SOURCE: Use IMAGE ${imageIndex} strictly for COLOR, MATERIAL, and DESIGN details.
-- PLACEMENT RULE:
-  * Detect the room's function based on the product type.
-  * If it's a SOFA/CHAIR: Orient it towards the room's focal point (TV, Window, or Fireplace).
-  * If it's a BED: Headboard MUST go against a solid wall, never blocking a door.
-  * If it's a TABLE: Center it in the functional area.
-  * If it's STORAGE: Place flush against a wall.
-- GEOMETRY: You MUST rotate and scale the object to match the perspective of Image 1 perfectly.`;
+    return `ASSET #${product.index + 1} (SOURCE: IMAGE ${imageIndex}):
+- **ITEM IDENTITY:** "${product.title}"
+- **EXTRACTION RULE:** Look at Image ${imageIndex}. IGNORE the background, the floor, and any other items in that photo. Mentally "crop" ONLY the ${product.title}.
+- **PLACEMENT IN ROOM (IMAGE 1):** * Take this "cropped" item and place it into the perspective of Image 1.
+  * Scale it realistically relative to the ceiling height of Image 1.
+  * If the product is a sofa/bed, place it where the main furniture logically belongs in Image 1.`;
 }
 
 /**
@@ -48,57 +44,52 @@ function buildProductInstruction(product: { title: string; index: number }): str
  */
 export function buildStagingPrompt(context: StagingPromptContext): string {
     const { analysis, products } = context;
+    const productInstructions = products.map(buildProductInstruction).join('\n\n');
 
-    const productInstructions = products
-        .map(buildProductInstruction)
-        .join('\n\n');
-
-    return `ROLE: You are an Architectural AI specialized in Virtual Staging and Renovation.
-    
-INPUT DATA:
-- IMAGE 1: The "SOURCE OF TRUTH" for the room's architecture.
-- IMAGES 2+: Real furniture products to be placed in the room.
-
-OBJECTIVE:
-Perform a "Virtual Staging" on Image 1. You must keep the room's shell exactly as it is but replace/add furniture using the provided products.
+    return `ROLE: You are an expert Interior Design AI specialized in "In-Painting" and Compositing.
 
 --------------------------------------------------------
-⚠️ CRITICAL ARCHITECTURAL RULES (ZERO TOLERANCE) ⚠️
+📸 INPUT IMAGE ROLES (CRITICAL)
 --------------------------------------------------------
-1. **THE SHELL IS SACRED:** You are FORBIDDEN from changing the structural elements of Image 1.
-   - DO NOT move, resize, or remove Windows or Doors.
-   - DO NOT change the type of flooring (e.g., if it's wood, keep it wood).
-   - DO NOT change the ceiling height or beam structure.
-   - DO NOT remove built-in elements like radiators, fireplaces, or moldings.
+**IMAGE 1 = THE CANVAS (THE ONLY ROOM)**
+- This is the ONLY space you are allowed to render. 
+- You must keep its walls, floor, windows, and lighting exactly as they are.
+- If Image 1 is NOT empty, you must virtually "remove" existing clutter/furniture to make space.
 
-2. **LIGHTING MATCH:** You MUST respect the natural light sources coming from the windows in Image 1. The shadows of the new furniture must match this lighting direction.
-
-3. **DECLUTTERING LOGIC:** - If Image 1 already has furniture (e.g., an old bed, a messy desk), you must visually "REMOVE" it to make space for the new products.
-   - Treat the existing furniture as "movable" and the walls/windows as "permanent".
+**IMAGES 2+ = THE WAREHOUSE (FURNITURE CATALOG)**
+- These images are ONLY to show you what the furniture looks like.
+- **WARNING:** The backgrounds in Images 2+ are FAKE settings. DO NOT COPY them. DO NOT let them influence the room's walls or floor.
+- Extract ONLY the furniture object defined in the description.
 
 --------------------------------------------------------
-DESIGN & PLACEMENT INSTRUCTIONS
+🏗️ EXECUTION STEPS
 --------------------------------------------------------
-STEP 1: ANALYZE THE PERSPECTIVE
-- Identify the Vanishing Points of Image 1.
-- All new furniture must align with these grid lines.
+STEP 1: ANALYZE THE CANVAS (IMAGE 1)
+- Map the perspective grid of Image 1.
+- Identify the light direction in Image 1 (look at the windows).
+- Detect architectural limits: Walls, Pillars, Door frames. These are IMMUTABLE.
 
-STEP 2: PLACE THE CATALOG PRODUCTS
+STEP 2: PREPARE THE SPACE
+- Does Image 1 have old furniture? -> Visually remove it (inpainting) to clear the floor.
+- Does Image 1 have a messy floor? -> Clean it virtually, keeping the original flooring material.
+
+STEP 3: INSERT THE ASSETS
 ${productInstructions}
 
-STEP 3: COMPOSE THE SCENE (FILLER DECOR)
-- Do not leave the selected products floating in a void.
-- Act as an interior designer: Add rugs, plants, lamps, artwork, and curtains to complete the look.
-- Style: ${analysis.style} matching the palette: ${analysis.colorPalette.join(', ')}.
+STEP 4: HARMONIZATION
+- Cast shadows from the new furniture onto the floor of Image 1.
+- The shadow direction MUST match the light coming from the windows in Image 1.
+- Color Correction: Adjust the furniture brightness/contrast to match the ambient light of Image 1.
 
 --------------------------------------------------------
-FINAL CHECKLIST
+🎨 FINAL STYLE GUIDE
 --------------------------------------------------------
-- [ ] Are the windows exactly where they were in Image 1? (YES)
-- [ ] Is the new furniture using the textures from Images 2+? (YES)
-- [ ] Is the perspective correct? (YES)
+- Room Style: ${analysis.style}
+- Palette: ${analysis.colorPalette.join(', ')}
+- Decor: Add subtle accessories (plants, rugs, lamps) to bind the scene, but keep the focus on the provided products.
 
-Output ONLY the final generated image.`;
+OUTPUT:
+Generate a photorealistic image that looks exactly like IMAGE 1, but furnished with the items from IMAGES 2+.`;
 }
 
 /**
@@ -124,11 +115,11 @@ STRICT RULES:
  * Staging prompt configuration.
  */
 export const STAGING_GENERATION_CONFIG = {
-    version: '2.0.0', // Major update for structural integrity
+    version: '2.1.0',
 
     generationConfig: {
         responseModalities: ['IMAGE'],
-        temperature: 0.3, // Lower temperature = Less hallucination, more adherence to image
+        temperature: 0.35,
         maxOutputTokens: 8192,
     },
 
@@ -143,5 +134,5 @@ export const STAGING_GENERATION_CONFIG = {
      * Enhanced negative prompt to prevent structural changes.
      */
     defaultNegativePrompt:
-        'changing walls, changing windows, changing doors, changing floor type, architectural changes, distorted perspective, floating furniture, bad shadows, low quality, cartoon, sketch, watermark, text, new room structure, room remodeling',
+        'changing walls, changing windows, changing doors, changing floor type, architectural changes, distorted perspective, floating furniture, bad shadows, low quality, cartoon, sketch, watermark, text, new room structure, room remodeling, merging backgrounds, changing room structure, changing windows, changing flooring, messy, distorted perspective, flying furniture, bad shadows, low quality, copying background from catalog images',
 } as const;
