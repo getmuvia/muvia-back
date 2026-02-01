@@ -180,37 +180,127 @@ export class GeminiImageProvider implements IImageGenerator {
 
             // JPEG: scan for SOF0 marker (0xFFC0)
             if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+                this.logger.debug('📷 Detected JPEG format');
+
+                // First, check for EXIF orientation
+                const orientation = this.getJpegExifOrientation(buffer);
+                const needsRotation = orientation >= 5 && orientation <= 8; // 5-8 means rotated 90° or 270°
+
                 let offset = 2;
                 while (offset < buffer.length - 10) {
                     if (buffer[offset] === 0xFF) {
                         const marker = buffer[offset + 1];
                         // SOF0, SOF1, SOF2 markers contain dimensions
                         if (marker >= 0xC0 && marker <= 0xC2) {
-                            const height = buffer.readUInt16BE(offset + 5);
-                            const width = buffer.readUInt16BE(offset + 7);
+                            let height = buffer.readUInt16BE(offset + 5);
+                            let width = buffer.readUInt16BE(offset + 7);
+
+                            // Swap dimensions if EXIF indicates rotation
+                            if (needsRotation) {
+                                this.logger.debug(`📷 EXIF orientation ${orientation} - swapping dimensions`);
+                                [width, height] = [height, width];
+                            }
+
+                            this.logger.debug(`📷 JPEG dimensions: ${width}x${height}`);
                             return { width, height };
                         }
-                        const length = buffer.readUInt16BE(offset + 2);
-                        offset += 2 + length;
+                        // Skip to next marker
+                        if (offset + 2 < buffer.length) {
+                            const length = buffer.readUInt16BE(offset + 2);
+                            offset += 2 + length;
+                        } else {
+                            break;
+                        }
                     } else {
                         offset++;
                     }
                 }
+                this.logger.warn('📷 JPEG: Could not find SOF marker with dimensions');
             }
 
             // WebP: 'RIFF....WEBP' format
             if (buffer.slice(0, 4).toString() === 'RIFF' && buffer.slice(8, 12).toString() === 'WEBP') {
+                this.logger.debug('📷 Detected WebP format');
                 // VP8 chunk starts at byte 12
                 const width = buffer.readUInt16LE(26) & 0x3FFF;
                 const height = buffer.readUInt16LE(28) & 0x3FFF;
                 if (width > 0 && height > 0) {
+                    this.logger.debug(`📷 WebP dimensions: ${width}x${height}`);
                     return { width, height };
                 }
             }
+
+            // Unknown format - log first bytes for debugging
+            this.logger.warn(`📷 Unknown image format. First 4 bytes: ${buffer.slice(0, 4).toString('hex')}`);
         } catch (e) {
             this.logger.debug(`Could not parse image dimensions: ${e.message}`);
         }
         return null;
+    }
+
+    /**
+     * Reads EXIF orientation from JPEG buffer.
+     * Returns orientation value 1-8, or 1 (normal) if not found.
+     * 
+     * Orientation values:
+     * 1 = Normal
+     * 3 = Upside down (180°)
+     * 5, 7 = Rotated 90° counter-clockwise (swap W/H)
+     * 6, 8 = Rotated 90° clockwise (swap W/H)
+     */
+    private getJpegExifOrientation(buffer: Buffer): number {
+        try {
+            // Look for EXIF marker (APP1 = 0xFFE1)
+            let offset = 2;
+            while (offset < buffer.length - 12) {
+                if (buffer[offset] === 0xFF && buffer[offset + 1] === 0xE1) {
+                    // Found APP1 (EXIF)
+                    const exifStart = offset + 4;
+
+                    // Check for 'Exif' signature
+                    if (buffer.slice(exifStart, exifStart + 4).toString() !== 'Exif') {
+                        break;
+                    }
+
+                    const tiffStart = exifStart + 6;
+                    const isLittleEndian = buffer.slice(tiffStart, tiffStart + 2).toString() === 'II';
+
+                    // Read IFD0 entry count
+                    const ifdOffset = tiffStart + 8;
+                    const entryCount = isLittleEndian
+                        ? buffer.readUInt16LE(ifdOffset)
+                        : buffer.readUInt16BE(ifdOffset);
+
+                    // Search for orientation tag (0x0112)
+                    for (let i = 0; i < entryCount; i++) {
+                        const entryOffset = ifdOffset + 2 + (i * 12);
+                        const tag = isLittleEndian
+                            ? buffer.readUInt16LE(entryOffset)
+                            : buffer.readUInt16BE(entryOffset);
+
+                        if (tag === 0x0112) { // Orientation tag
+                            const orientation = isLittleEndian
+                                ? buffer.readUInt16LE(entryOffset + 8)
+                                : buffer.readUInt16BE(entryOffset + 8);
+                            this.logger.debug(`📷 EXIF orientation found: ${orientation}`);
+                            return orientation;
+                        }
+                    }
+                    break;
+                }
+
+                // Move to next marker
+                if (buffer[offset] === 0xFF) {
+                    const length = buffer.readUInt16BE(offset + 2);
+                    offset += 2 + length;
+                } else {
+                    offset++;
+                }
+            }
+        } catch (e) {
+            this.logger.debug(`Could not read EXIF orientation: ${e.message}`);
+        }
+        return 1; // Default: normal orientation
     }
 
     /**
