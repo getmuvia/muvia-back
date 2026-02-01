@@ -69,6 +69,10 @@ export class GeminiImageProvider implements IImageGenerator {
     async generate(request: ImageGenerationRequest): Promise<ImageGenerationResult> {
         const startTime = Date.now();
 
+        // Detect aspect ratio from source image or use provided value
+        const aspectRatio = await this.detectAspectRatio(request);
+        this.logger.debug(`🖼️ Using aspect ratio: ${aspectRatio}`);
+
         const contentParts = await this.buildRequestParts(request);
 
         this.logger.debug(`Generating staged image via ${this.MODEL_NAME}`);
@@ -81,6 +85,10 @@ export class GeminiImageProvider implements IImageGenerator {
                     config: {
                         responseModalities: ['IMAGE'],
                         temperature: IMAGE_GENERATION_CONFIG.generationConfig.temperature,
+                        // Match the original image aspect ratio
+                        imageConfig: {
+                            aspectRatio: aspectRatio,
+                        },
                     },
                 }),
                 {
@@ -104,6 +112,137 @@ export class GeminiImageProvider implements IImageGenerator {
             this.logger.error(`Image generation failed: ${error.message}`);
             throw new Error(`Virtual Staging failed: ${error.message}`);
         }
+    }
+
+    /**
+     * Detects the aspect ratio from the source image or uses provided value.
+     * Maps to the closest supported aspect ratio.
+     * 
+     * Supported ratios: '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '5:4', '4:5'
+     */
+    private async detectAspectRatio(request: ImageGenerationRequest): Promise<string> {
+        // If explicitly provided, use it
+        if (request.aspectRatio) {
+            return request.aspectRatio;
+        }
+
+        // Try to detect from source image
+        try {
+            const imageBuffer = await this.getSourceImageBuffer(request);
+            if (imageBuffer) {
+                const dimensions = this.getImageDimensions(imageBuffer);
+                if (dimensions) {
+                    const ratio = dimensions.width / dimensions.height;
+                    return this.mapToSupportedAspectRatio(ratio);
+                }
+            }
+        } catch (e) {
+            this.logger.warn(`Could not detect aspect ratio: ${e.message}`);
+        }
+
+        // Default to 4:3 (common room photo ratio)
+        return '4:3';
+    }
+
+    /**
+     * Gets the source image as a buffer for dimension detection.
+     */
+    private async getSourceImageBuffer(request: ImageGenerationRequest): Promise<Buffer | null> {
+        try {
+            if (request.imageSource.key) {
+                const file = this.storage.bucket(this.bucketName).file(request.imageSource.key);
+                const [buffer] = await file.download();
+                return buffer;
+            }
+            if (request.imageSource.url) {
+                const response = await fetch(request.imageSource.url);
+                const arrayBuffer = await response.arrayBuffer();
+                return Buffer.from(arrayBuffer);
+            }
+        } catch (e) {
+            this.logger.debug(`Could not get source image buffer: ${e.message}`);
+        }
+        return null;
+    }
+
+    /**
+     * Extracts image dimensions from buffer (supports PNG, JPEG, WebP).
+     * Simple header parsing without external dependencies.
+     */
+    private getImageDimensions(buffer: Buffer): { width: number; height: number } | null {
+        try {
+            // PNG: dimensions at bytes 16-24
+            if (buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4E && buffer[3] === 0x47) {
+                const width = buffer.readUInt32BE(16);
+                const height = buffer.readUInt32BE(20);
+                return { width, height };
+            }
+
+            // JPEG: scan for SOF0 marker (0xFFC0)
+            if (buffer[0] === 0xFF && buffer[1] === 0xD8) {
+                let offset = 2;
+                while (offset < buffer.length - 10) {
+                    if (buffer[offset] === 0xFF) {
+                        const marker = buffer[offset + 1];
+                        // SOF0, SOF1, SOF2 markers contain dimensions
+                        if (marker >= 0xC0 && marker <= 0xC2) {
+                            const height = buffer.readUInt16BE(offset + 5);
+                            const width = buffer.readUInt16BE(offset + 7);
+                            return { width, height };
+                        }
+                        const length = buffer.readUInt16BE(offset + 2);
+                        offset += 2 + length;
+                    } else {
+                        offset++;
+                    }
+                }
+            }
+
+            // WebP: 'RIFF....WEBP' format
+            if (buffer.slice(0, 4).toString() === 'RIFF' && buffer.slice(8, 12).toString() === 'WEBP') {
+                // VP8 chunk starts at byte 12
+                const width = buffer.readUInt16LE(26) & 0x3FFF;
+                const height = buffer.readUInt16LE(28) & 0x3FFF;
+                if (width > 0 && height > 0) {
+                    return { width, height };
+                }
+            }
+        } catch (e) {
+            this.logger.debug(`Could not parse image dimensions: ${e.message}`);
+        }
+        return null;
+    }
+
+    /**
+     * Maps a numeric ratio to the closest supported aspect ratio string.
+     */
+    private mapToSupportedAspectRatio(ratio: number): string {
+        const supportedRatios = [
+            { name: '21:9', value: 21 / 9 },   // 2.33
+            { name: '16:9', value: 16 / 9 },   // 1.78
+            { name: '3:2', value: 3 / 2 },     // 1.50
+            { name: '4:3', value: 4 / 3 },     // 1.33
+            { name: '5:4', value: 5 / 4 },     // 1.25
+            { name: '1:1', value: 1 },         // 1.00
+            { name: '4:5', value: 4 / 5 },     // 0.80
+            { name: '3:4', value: 3 / 4 },     // 0.75
+            { name: '2:3', value: 2 / 3 },     // 0.67
+            { name: '9:16', value: 9 / 16 },   // 0.56
+        ];
+
+        let closest = supportedRatios[0];
+        let minDiff = Math.abs(ratio - closest.value);
+
+        for (const supported of supportedRatios) {
+            const diff = Math.abs(ratio - supported.value);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = supported;
+            }
+        }
+
+        this.logger.debug(`Detected ratio ${ratio.toFixed(2)} → mapped to ${closest.name}`);
+        return closest.name;
     }
 
     /**

@@ -50,13 +50,38 @@ You are NOT just placing furniture - you are designing a COMPLETE, HARMONIOUS li
 
 **IMAGE 1 = THE EMPTY CANVAS**
 - This is the room you must transform into a beautifully decorated space.
-- PRESERVE: walls, windows, doors, floor material, architectural features, lighting sources.
 - TRANSFORM: Remove any existing clutter or old furniture to make space for your design.
 
 **IMAGES 2, 3, 4... = ANCHOR PRODUCTS (YOUR INSPIRATION)**
 - These are REAL products that MUST appear in your final design.
 - They are your "anchor pieces" - the starting point for a complete decoration.
 ${productList}
+
+════════════════════════════════════════════════════════════════════
+🚫 IMMUTABLE ELEMENTS - DO NOT MODIFY UNDER ANY CIRCUMSTANCES
+════════════════════════════════════════════════════════════════════
+
+These elements are FIXED CONSTRUCTION and must remain EXACTLY as shown in IMAGE 1:
+
+**STRUCTURAL ELEMENTS (OBRA BRUTA):**
+- Wall positions, angles, and colors (unless you're adding accent paint)
+- Ceiling height, shape, and angle (including sloped/vaulted ceilings)
+- Floor material, pattern, and color (keep original wood, tile, carpet, etc.)
+- Window positions, sizes, and frames
+- Door positions, sizes, and frames
+- Pillars, columns, and beams
+- Built-in shelves, fireplaces, or niches
+
+**PERSPECTIVE & DIMENSIONS:**
+- The camera angle must remain IDENTICAL to IMAGE 1
+- Room dimensions must appear the same (don't make it look larger or smaller)
+- Vanishing points and perspective lines must match exactly
+- The aspect ratio of the output must match IMAGE 1
+
+**LIGHTING SOURCES:**
+- Natural light direction from windows must be preserved
+- Existing ceiling fixtures positions (you can update the fixture style)
+- Shadow directions must match the original light sources
 
 ════════════════════════════════════════════════════════════════════
 🎯 YOUR CREATIVE MISSION
