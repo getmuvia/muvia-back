@@ -26,11 +26,10 @@ import { VISION_PROVIDER } from './interfaces/vision-provider.interface';
 import { IMAGE_GENERATOR } from './interfaces/image-generator.interface';
 import { SCAN_3D_PROVIDER } from './interfaces/scan-3d-provider.interface';
 
-import { ImagenProvider } from './providers/google/imagen.provider';
 import { Vertex3DProvider } from './providers/google/vertex-3d.provider';
 import { Scan3dService } from './services/scan-3d/scan-3d.service';
 import { Scan3dController } from './controllers/scan-3d.controller';
-import { Gemini3VisionProvider } from './providers/google';
+import { Gemini3VisionProvider, GeminiImageProvider } from './providers/google';
 
 /**
  * AI Module - Semantic search, embeddings, and virtual staging.
@@ -59,34 +58,29 @@ import { Gemini3VisionProvider } from './providers/google';
     ],
 
     providers: [
-        // Core utilities (shared across providers)
         RetryService,
         ImageResolverService,
 
-        // Repository
         ProductVectorRepository,
 
-        // Services
         VectorService,
         EmbeddingService,
         SearchService,
         Scan3dService,
 
-        // AI Providers (Ports & Adapters)
         {
             provide: VISION_PROVIDER,
             useClass: Gemini3VisionProvider,
         },
         {
             provide: IMAGE_GENERATOR,
-            useClass: ImagenProvider,
+            useClass: GeminiImageProvider,
         },
         {
             provide: SCAN_3D_PROVIDER,
             useClass: Vertex3DProvider,
         },
 
-        // Orchestrators
         VirtualStagingService,
     ],
 
