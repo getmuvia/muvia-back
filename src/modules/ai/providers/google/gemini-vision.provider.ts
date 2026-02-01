@@ -31,7 +31,7 @@ export class GeminiVisionProvider implements IVisionProvider {
     ) {
         const projectId = this.configService.get<string>('GCP_PROJECT_ID');
         const location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
-        this.MODEL_NAME = this.configService.get<string>('GCP_GEMINI_MODEL', 'gemini-1.5-pro');
+        this.MODEL_NAME = this.configService.get<string>('GCP_GEMINI_MODEL', 'gemini-2.5-flash');
 
         if (!projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');

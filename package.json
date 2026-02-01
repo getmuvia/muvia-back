@@ -24,6 +24,7 @@
     "@google-cloud/aiplatform": "^6.2.0",
     "@google-cloud/storage": "^7.18.0",
     "@google-cloud/vertexai": "^1.10.0",
+    "@google/genai": "^1.39.0",
     "@nestjs/common": "^11.0.1",
     "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",

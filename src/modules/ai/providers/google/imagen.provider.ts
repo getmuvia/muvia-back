@@ -39,7 +39,7 @@ export class ImagenProvider implements IImageGenerator {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
         this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.0-flash-exp');
+        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.5-flash-image');
 
         this.storage = new Storage();
 
