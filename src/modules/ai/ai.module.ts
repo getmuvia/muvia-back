@@ -25,11 +25,12 @@ import { VirtualStagingController } from './controllers/virtual-staging.controll
 import { VISION_PROVIDER } from './interfaces/vision-provider.interface';
 import { IMAGE_GENERATOR } from './interfaces/image-generator.interface';
 import { SCAN_3D_PROVIDER } from './interfaces/scan-3d-provider.interface';
+import { EMBEDDING_PROVIDER } from './interfaces/embedding-provider.interface';
 
 import { Vertex3DProvider } from './providers/google/vertex-3d.provider';
 import { Scan3dService } from './services/scan-3d/scan-3d.service';
 import { Scan3dController } from './controllers/scan-3d.controller';
-import { Gemini3VisionProvider, GeminiImageProvider } from './providers/google';
+import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } from './providers/google';
 
 /**
  * AI Module - Semantic search, embeddings, and virtual staging.
@@ -79,6 +80,10 @@ import { Gemini3VisionProvider, GeminiImageProvider } from './providers/google';
         {
             provide: SCAN_3D_PROVIDER,
             useClass: Vertex3DProvider,
+        },
+        {
+            provide: EMBEDDING_PROVIDER,
+            useClass: VertexEmbeddingProvider,
         },
 
         VirtualStagingService,
