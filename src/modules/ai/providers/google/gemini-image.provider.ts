@@ -109,11 +109,14 @@ export class GeminiImageProvider implements IImageGenerator {
     /**
      * Builds request parts array (images + text prompt).
      * Format compatible with @google/genai SDK.
+     * 
+     * Order: [Room Image] + [Product Images...] + [Text Prompt]
+     * This order matches the prompt expectations (IMAGE 1 = room, IMAGES 2+ = products)
      */
     private async buildRequestParts(request: ImageGenerationRequest): Promise<any[]> {
         const parts: any[] = [];
 
-        // Add room image (source image)
+        // Add room image (source image) - This becomes IMAGE 1 in the prompt
         if (request.imageSource.key || request.imageSource.url) {
             try {
                 const roomBase64 = await this.imageResolver.toBase64(request.imageSource);
@@ -127,17 +130,22 @@ export class GeminiImageProvider implements IImageGenerator {
                         data: roomBase64,
                     },
                 });
-                this.logger.debug('Room image added to context');
+                this.logger.debug('✅ Room image (IMAGE 1) added to context');
             } catch (e) {
-                this.logger.warn(`Could not load source image: ${e.message}`);
+                this.logger.error(`❌ CRITICAL: Could not load source image: ${e.message}`);
+                throw new Error(`Failed to load room image: ${e.message}`);
             }
         }
 
-        // Add product reference images
+        // Add product reference images - These become IMAGES 2, 3, 4... in the prompt
         if (request.referenceImages?.length) {
-            this.logger.debug(`Adding ${request.referenceImages.length} reference images`);
-            for (const productUrl of request.referenceImages) {
+            this.logger.debug(`📦 Processing ${request.referenceImages.length} product reference images...`);
+            let successCount = 0;
+
+            for (let i = 0; i < request.referenceImages.length; i++) {
+                const productUrl = request.referenceImages[i];
                 try {
+                    this.logger.debug(`  Loading product ${i + 1}: ${productUrl.substring(0, 80)}...`);
                     const productBase64 = await this.imageResolver.toBase64({ url: productUrl });
                     parts.push({
                         inlineData: {
@@ -145,14 +153,22 @@ export class GeminiImageProvider implements IImageGenerator {
                             data: productBase64
                         },
                     });
+                    successCount++;
+                    this.logger.debug(`  ✅ Product ${i + 1} (IMAGE ${i + 2}) loaded successfully`);
                 } catch (e) {
-                    this.logger.warn(`Failed to load product image ${productUrl}: ${e.message}`);
+                    this.logger.error(`  ❌ Failed to load product ${i + 1}: ${e.message}`);
                 }
             }
+
+            this.logger.log(`📦 Added ${successCount}/${request.referenceImages.length} product images to request`);
+        } else {
+            this.logger.warn('⚠️ No reference images provided - generating without product references');
         }
 
         // Add text prompt (already built by VirtualStagingService using buildStagingPrompt)
         parts.push({ text: request.prompt });
+
+        this.logger.debug(`📤 Total parts in request: ${parts.length} (${parts.length - 1} images + 1 prompt)`);
 
         return parts;
     }
