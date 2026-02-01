@@ -50,10 +50,10 @@ And returns semantically relevant products, even if they don't contain those exa
 ## Solution Architecture
 
 ```
-┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
-│   User Query    │───▶│   VectorService  │───▶│   Vertex AI     │
-│ "sofá nórdico"  │    │  (NestJS Service)│    │ text-embedding  │
-└─────────────────┘    └──────────────────┘    └─────────────────┘
+┌─────────────────┐    ┌───────────────────────┐    ┌─────────────────┐
+│   User Query    │───▶│VertexEmbeddingProvider│───▶│   Vertex AI     │
+│ "sofá nórdico"  │    │   (NestJS Provider)   │    │ text-embedding  │
+└─────────────────┘    └───────────────────────┘    └─────────────────┘
                                 │
                                 ▼
                        ┌──────────────────┐
@@ -70,37 +70,41 @@ And returns semantically relevant products, even if they don't contain those exa
 
 ### Module Architecture
 
-Following **SOLID principles** and **NestJS best practices**:
+Following **Ports & Adapters** pattern and **NestJS best practices**:
 
 ```
 src/modules/ai/
-├── ai.module.ts                           # Module registration
+├── ai.module.ts
 ├── controllers/
-│   ├── search.controller.ts               # Search API endpoints
-│   └── embedding.controller.ts            # Admin embedding endpoints
+│   ├── search.controller.ts
+│   └── embedding.controller.ts
 ├── dto/
-│   └── search-query.dto.ts                # Request validation
+│   └── search-query.dto.ts
 ├── interfaces/
-│   └── search-result.interface.ts         # Response types
+│   ├── search-result.interface.ts
+│   └── embedding-provider.interface.ts
+├── providers/
+│   └── google/
+│       └── vertex-embedding.provider.ts
 ├── repositories/
-│   └── product-vector.repository.ts       # pgvector SQL queries (SRP)
+│   └── product-vector.repository.ts
 └── services/
     ├── vector/
-    │   └── vector.service.ts              # Vertex AI client (SRP)
+    │   └── vector.service.ts
     ├── embedding/
-    │   └── embedding.service.ts           # Embedding orchestration (SRP)
+    │   └── embedding.service.ts
     └── search/
-        └── search.service.ts              # Search orchestration (SRP)
+        └── search.service.ts
 ```
 
 ### Design Patterns Applied
 
 | Pattern | Application |
 |---------|-------------|
+| **Ports & Adapters** | IEmbeddingProvider interface with VertexEmbeddingProvider adapter |
 | **Single Responsibility** | Each service/repository has one reason to change |
 | **Dependency Injection** | All dependencies injected via constructors |
 | **Repository Pattern** | ProductVectorRepository encapsulates SQL queries |
-| **Layered Architecture** | Controller → Service → Repository |
 
 ---
 
@@ -110,17 +114,31 @@ src/modules/ai/
 
 | Aspect | Choice | Justification |
 |--------|--------|---------------|
-| **Provider** | Google Cloud Vertex AI | Consistent with existing GCP infrastructure (Cloud Run, Cloud SQL) |
+| **Provider** | Google Cloud Vertex AI | Consistent with existing GCP infrastructure |
 | **Model** | `text-embedding-004` | State-of-the-art multilingual embedding model with 768 dimensions |
 | **SDK** | `@google-cloud/aiplatform` | Official low-level Google Cloud AI Platform SDK for Node.js |
 
-**Why Vertex AI over alternatives?**
+### Embedding Provider: VertexEmbeddingProvider
 
-| Option | Pros | Cons |
-|--------|------|------|
-| **OpenAI** | Excellent quality | Additional vendor, separate billing |
-| **Gemini API** | Easy to use | Less enterprise features |
-| **Vertex AI** ✓ | GCP-native, IAM integration, no separate API key needed | Slightly more complex setup |
+The `VertexEmbeddingProvider` implements `IEmbeddingProvider` interface:
+
+```typescript
+interface IEmbeddingProvider {
+    generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<EmbeddingResult>;
+    isAvailable(): boolean;
+}
+
+type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
+
+interface EmbeddingResult {
+    embedding: number[];
+    dimensions: number;
+}
+```
+
+**Task Types:**
+- `RETRIEVAL_DOCUMENT`: Used when generating embeddings for products (stored in DB)
+- `RETRIEVAL_QUERY`: Used when generating embeddings for search queries
 
 ### Database: PostgreSQL + pgvector
 
@@ -130,111 +148,64 @@ src/modules/ai/
 | **pgvector** | Extension for storing and querying vector embeddings |
 | **Cosine Distance** | Operator `<=>` for measuring similarity between vectors |
 
-**Why pgvector over dedicated vector databases?**
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **Pinecone** | Managed, fast | Additional service, data sync complexity |
-| **Milvus** | Feature-rich | Operational overhead |
-| **pgvector** ✓ | No infrastructure changes, ACID transactions, joins with product data | Slightly slower at very large scale |
-
 ---
 
 ## Implementation Details
 
 ### Service Responsibilities
 
-#### VectorService
-Low-level Vertex AI client using `PredictionServiceClient` from `@google-cloud/aiplatform`:
-- Connecting to Vertex AI via regional API endpoint
-- Generating embeddings with configurable task types
-- Using `helpers.toValue()` and `helpers.fromValue()` for Protobuf conversion
-- Text sanitization
+#### VertexEmbeddingProvider
+
+Low-level Vertex AI client using `PredictionServiceClient`:
 
 ```typescript
-// vector.service.ts
-type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
-
-async generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<number[]>
-toVectorString(embedding: number[]): string
-isAvailable(): boolean
+@Injectable()
+export class VertexEmbeddingProvider implements IEmbeddingProvider {
+    async generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<EmbeddingResult>;
+    isAvailable(): boolean;
+}
 ```
 
-> **Task Types:**
-> - `RETRIEVAL_DOCUMENT`: Used when generating embeddings for products (stored in DB)
-> - `RETRIEVAL_QUERY`: Used when generating embeddings for search queries
+Features:
+- Uses regional API endpoint (e.g., `us-central1-aiplatform.googleapis.com`)
+- Configurable via `GCP_EMBEDDING_LOCATION` and `GCP_EMBEDDING_MODEL`
+- Automatic retry with exponential backoff
+- Text sanitization
 
-#### ProductVectorRepository
-Encapsulates all pgvector SQL queries:
-- Similarity search with cosine distance
-- Embedding CRUD operations
+#### VectorService
+
+Uses `IEmbeddingProvider` via dependency injection:
 
 ```typescript
-// product-vector.repository.ts
+@Injectable()
+export class VectorService {
+    constructor(
+        @Inject(EMBEDDING_PROVIDER)
+        private readonly embeddingProvider: IEmbeddingProvider
+    ) {}
+
+    async generateEmbedding(text: string, taskType?: string): Promise<number[]>;
+    toVectorString(embedding: number[]): string;
+    isAvailable(): boolean;
+}
+```
+
+#### ProductVectorRepository
+
+Encapsulates all pgvector SQL queries:
+
+```typescript
 async findBySimilarity(embedding: string, limit: number, threshold: number): Promise<SearchProductResult[]>
 async updateEmbedding(productId: string, embedding: string): Promise<void>
 async findWithoutEmbedding(): Promise<Product[]>
 ```
 
-#### EmbeddingService
-Orchestrates embedding generation:
-- Combines product text fields
-- Delegates to VectorService and Repository
-
-```typescript
-// embedding.service.ts
-async createForProduct(product: Partial<Product>): Promise<string | null>
-async updateForProduct(productId: string): Promise<void>
-async regenerateAll(): Promise<{ updated: number; failed: number }>
-```
-
 #### SearchService
+
 Orchestrates semantic search:
-- Batch query processing with parallel execution
-- Uses `RETRIEVAL_QUERY` task type for query embeddings
-- Error isolation per query (failed queries return empty results)
 
 ```typescript
-// search.service.ts
-async searchBatch(dto: SearchQueryDto): Promise<SearchResult[]>  // Parallel processing
-private async searchOne(query, limit, threshold): Promise<SearchResult>  // Single query
-private async findSimilarProducts(query, limit, threshold): Promise<SearchProductResult[]>
-private async createQueryEmbedding(query): Promise<string>  // Uses 'RETRIEVAL_QUERY'
-```
-
-### Embedding Generation
-
-Embeddings are automatically generated when:
-1. A new product is **created**
-2. A product's **title**, **description**, or **keywords** are **updated**
-
-The embedding generation is **non-blocking** - the product CRUD operation completes immediately, and embedding is generated in the background.
-
-```typescript
-// products.service.ts
-private triggerEmbeddingGeneration(productId: string): void {
-    this.embeddingService.updateForProduct(productId).catch(() => {
-        // Silently fail - embedding is non-critical
-    });
-}
-```
-
-### Similarity Calculation
-
-We use **Cosine Similarity** because:
-- It measures the *angle* between vectors, not magnitude
-- Works well for semantic comparison regardless of text length
-- Standard in NLP applications
-
-```sql
-SELECT 
-    p.*,
-    1 - (p.embedding <=> $1::vector) as similarity
-FROM products p
-WHERE p.embedding IS NOT NULL
-  AND 1 - (p.embedding <=> $1::vector) >= $2
-ORDER BY p.embedding <=> $1::vector ASC
-LIMIT $3
+async searchBatch(dto: SearchQueryDto): Promise<SearchResult[]>
 ```
 
 ---
@@ -275,8 +246,7 @@ Performs batch semantic search on products.
         "description": "...",
         "price": 1299.99,
         "similarity": 0.89,
-        "imageUrl": "https://...",
-        ...
+        "imageUrl": "https://..."
       }
     ]
   }
@@ -285,7 +255,7 @@ Performs batch semantic search on products.
 
 ### POST `/ai/embeddings/regenerate`
 
-Regenerates embeddings for all products without one. Requires authentication (Vendor role).
+Regenerates embeddings for all products without one. Requires authentication.
 
 **Response:**
 ```json
@@ -301,13 +271,16 @@ Regenerates embeddings for all products without one. Requires authentication (Ve
 
 ### Environment Variables
 
-Add to your `.env` file:
-
 ```env
-# Google Cloud Platform - Vertex AI
+# Google Cloud Platform
 GCP_PROJECT_ID=your-gcp-project-id
-GCP_LOCATION=us-central1
+
+# Embedding-specific (separate from Vision/Image Generation)
+GCP_EMBEDDING_LOCATION=us-central1
+GCP_EMBEDDING_MODEL=text-embedding-004
 ```
+
+> **Important:** Embedding models do NOT support the 'global' endpoint. Always use regional endpoints like `us-central1`.
 
 ### Authentication
 
@@ -322,18 +295,11 @@ Vertex AI uses **Application Default Credentials (ADC)**. Ensure:
 
 ### Enable pgvector Extension
 
-Run this SQL on your PostgreSQL database:
-
 ```sql
--- Enable the vector extension (requires superuser or rds_superuser)
 CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
-> **Note for Cloud SQL:** The extension is pre-installed. Just run `CREATE EXTENSION`.
-
 ### Verify Column Creation
-
-After starting the application with `synchronize: true`, verify:
 
 ```sql
 SELECT column_name, data_type 
@@ -355,7 +321,7 @@ curl -X POST http://localhost:3000/ai/search \
   }'
 ```
 
-### Multiple Queries with Custom Settings
+### Multiple Queries
 
 ```bash
 curl -X POST http://localhost:3000/ai/search \
@@ -370,13 +336,6 @@ curl -X POST http://localhost:3000/ai/search \
   }'
 ```
 
-### Backfill Existing Products
-
-```bash
-curl -X POST http://localhost:3000/ai/embeddings/regenerate \
-  -H "Authorization: Bearer YOUR_JWT_TOKEN"
-```
-
 ---
 
 ## Performance Considerations
@@ -389,62 +348,48 @@ curl -X POST http://localhost:3000/ai/embeddings/regenerate \
 
 ### Indexing (Recommended for Production)
 
-For databases with >10,000 products, add an IVFFlat index:
+For databases with >10,000 products:
 
 ```sql
--- Create index for faster similarity search
 CREATE INDEX ON products 
 USING ivfflat (embedding vector_cosine_ops) 
 WITH (lists = 100);
 ```
 
-### Caching Considerations
-
-- Query embeddings can be cached if the same query is repeated
-- Product embeddings are generated once and stored persistently
-
 ---
 
 ## Troubleshooting
 
-### "VectorService not initialized"
+### "VertexEmbeddingProvider not ready"
 
-**Cause:** Missing `GCP_PROJECT_ID` environment variable.
+**Cause:** Missing environment variable or initialization failed.
 
-**Fix:** Add `GCP_PROJECT_ID` to your `.env` file.
+**Fix:** Check `GCP_PROJECT_ID` and `GCP_EMBEDDING_LOCATION` are set correctly.
 
-### "Column 'embedding' of type 'vector' does not exist"
+### "404 Not Found" on embedding generation
 
-**Cause:** pgvector extension not enabled.
+**Cause:** Using `global` endpoint for embeddings.
 
-**Fix:** Run `CREATE EXTENSION IF NOT EXISTS vector;` on your database.
+**Fix:** Set `GCP_EMBEDDING_LOCATION=us-central1` (embedding models don't support global).
 
 ### "Permission denied for Vertex AI"
 
 **Cause:** Service account lacks permissions.
 
-**Fix:** Grant `roles/aiplatform.user` to your service account:
-```bash
-gcloud projects add-iam-policy-binding PROJECT_ID \
-  --member="serviceAccount:SA_EMAIL" \
-  --role="roles/aiplatform.user"
-```
+**Fix:** Grant `roles/aiplatform.user` to your service account.
 
 ### Low-Quality Search Results
-
-**Cause:** Threshold too high or product descriptions too short.
 
 **Fixes:**
 1. Lower the `threshold` parameter (e.g., 0.3)
 2. Ensure products have detailed `description` and `keywords`
-3. Run `/ai/regenerate-embeddings` after improving product data
+3. Run `/ai/embeddings/regenerate` after improving product data
 
 ---
 
 ## Future Enhancements
 
-- [ ] **Hybrid Search:** Combine semantic + keyword search for best of both
+- [ ] **Hybrid Search:** Combine semantic + keyword search
 - [ ] **Query Expansion:** Automatically expand queries with synonyms
 - [ ] **Category Filtering:** Filter semantic results by category
 - [ ] **Personalization:** Boost results based on user preferences
-- [ ] **A/B Testing:** Compare semantic vs. keyword search performance
