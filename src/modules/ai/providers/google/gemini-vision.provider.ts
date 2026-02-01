@@ -1,6 +1,6 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { VertexAI, GenerativeModel, Part } from '@google-cloud/vertexai';
+import { VertexAI, GenerativeModel } from '@google-cloud/vertexai';
 import {
     IVisionProvider,
     RoomAnalysisResult,
@@ -9,14 +9,6 @@ import {
 import { RetryService, ImageResolverService } from '../../core';
 import { ROOM_ANALYSIS_PROMPT } from '../../prompts';
 
-/**
- * Google Gemini Vision implementation of IVisionProvider.
- * Uses Vertex AI Gemini models for room image analysis.
- * 
- * Image resolution strategy:
- * - key provided → Uses gs:// reference (zero backend memory, fastest)
- * - url provided → Downloads to buffer, sends as base64
- */
 @Injectable()
 export class GeminiVisionProvider implements IVisionProvider {
     private readonly logger = new Logger(GeminiVisionProvider.name);
@@ -40,25 +32,18 @@ export class GeminiVisionProvider implements IVisionProvider {
 
         this.vertexAI = new VertexAI({ project: projectId, location });
         this.model = this.vertexAI.getGenerativeModel({ model: this.MODEL_NAME });
-
         this.logger.log(`✅ GeminiVisionProvider initialized (${this.MODEL_NAME})`);
     }
 
     async analyzeRoom(input: ImageSourceInput): Promise<RoomAnalysisResult> {
         this.imageResolver.validateSource(input);
-
         const imagePart = await this.imageResolver.toGeminiPart(input);
-        this.logger.debug(`Analyzing room image via ${input.key ? 'gs://' : 'URL download'}...`);
+        this.logger.debug(`Analyzing room via ${input.key ? 'GCS' : 'URL'}...`);
 
         try {
             const response = await this.retryService.withExponentialBackoff(
                 () => this.model.generateContent({
-                    contents: [
-                        {
-                            role: 'user',
-                            parts: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }],
-                        },
-                    ],
+                    contents: [{ role: 'user', parts: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }] }],
                     generationConfig: ROOM_ANALYSIS_PROMPT.generationConfig,
                 }),
                 {
@@ -68,12 +53,8 @@ export class GeminiVisionProvider implements IVisionProvider {
                 },
             );
 
-            const result = response.response;
-            const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-
-            if (!text) {
-                throw new Error('No response from Gemini Vision');
-            }
+            const text = response.response.candidates?.[0]?.content?.parts?.[0]?.text;
+            if (!text) throw new Error('No response from Gemini Vision');
 
             return this.parseResponse(text);
         } catch (error) {
@@ -82,9 +63,6 @@ export class GeminiVisionProvider implements IVisionProvider {
         }
     }
 
-    /**
-     * Parses Gemini JSON response into RoomAnalysisResult.
-     */
     private parseResponse(text: string): RoomAnalysisResult {
         try {
             const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
@@ -99,7 +77,7 @@ export class GeminiVisionProvider implements IVisionProvider {
                 dimensions: parsed.dimensions,
             };
         } catch (error) {
-            this.logger.error(`Failed to parse Gemini response: ${text}`);
+            this.logger.error(`Failed to parse response: ${text}`);
             throw new Error('Invalid response format from vision model');
         }
     }

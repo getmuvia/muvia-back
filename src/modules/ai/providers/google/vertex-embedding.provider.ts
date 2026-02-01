@@ -8,19 +8,6 @@ import {
 } from '../../interfaces/embedding-provider.interface';
 import { RetryService } from '../../core/retry';
 
-/**
- * Vertex AI Embedding Provider using text-embedding-004 model.
- * 
- * Implements IEmbeddingProvider for the Ports & Adapters pattern.
- * 
- * Environment variables:
- * - GCP_PROJECT_ID: Google Cloud project ID
- * - GCP_EMBEDDING_LOCATION: Location for embeddings (default: us-central1)
- * - GCP_EMBEDDING_MODEL: Embedding model (default: text-embedding-004)
- * 
- * Note: Embedding models do NOT support the 'global' endpoint.
- * They must use regional endpoints like us-central1.
- */
 @Injectable()
 export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
     private readonly logger = new Logger(VertexEmbeddingProvider.name);
@@ -54,13 +41,10 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
     ): Promise<EmbeddingResult> {
         this.ensureInitialized();
         const cleanText = this.sanitizeText(text);
-
         const endpointResourceName = `projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}`;
         const instanceValue = this.buildPredictionInstance(cleanText, taskType);
 
-        if (!instanceValue) {
-            throw new Error('Failed to convert input to Protobuf format');
-        }
+        if (!instanceValue) throw new Error('Failed to convert input to Protobuf format');
 
         try {
             const embedding = await this.retryService.withExponentialBackoff(
@@ -77,10 +61,7 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
                 },
             );
 
-            return {
-                embedding,
-                dimensions: embedding.length,
-            };
+            return { embedding, dimensions: embedding.length };
         } catch (error) {
             this.logger.error(`Embedding generation failed: ${error.message}`);
             throw new Error(`Embedding generation failed: ${error.message}`);
@@ -89,34 +70,24 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
 
     private initialize(): void {
         if (!this.projectId) {
-            this.logger.error('GCP_PROJECT_ID not configured. VertexEmbeddingProvider disabled.');
+            this.logger.error('GCP_PROJECT_ID not configured');
             return;
         }
 
         try {
-            const apiEndpoint = `${this.location}-aiplatform.googleapis.com`;
-
             this.client = new PredictionServiceClient({
-                apiEndpoint: apiEndpoint,
+                apiEndpoint: `${this.location}-aiplatform.googleapis.com`,
             });
-
             this.initialized = true;
             this.logger.log(`✅ VertexEmbeddingProvider initialized (${this.MODEL_NAME} @ ${this.location})`);
         } catch (err) {
-            this.logger.error(`Failed to initialize PredictionServiceClient: ${err.message}`);
+            this.logger.error(`Failed to initialize: ${err.message}`);
         }
     }
 
     private buildPredictionInstance(text: string, taskType: EmbeddingTaskType) {
-        const instance: Record<string, any> = {
-            content: text,
-            task_type: taskType
-        };
-
-        if (taskType === 'RETRIEVAL_DOCUMENT') {
-            instance.title = 'Product Description';
-        }
-
+        const instance: Record<string, any> = { content: text, task_type: taskType };
+        if (taskType === 'RETRIEVAL_DOCUMENT') instance.title = 'Product Description';
         return helpers.toValue(instance);
     }
 
@@ -124,23 +95,17 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
         response: protos.google.cloud.aiplatform.v1.IPredictResponse
     ): number[] {
         const predictions = response.predictions;
-
-        if (!predictions || predictions.length === 0) {
-            throw new Error('No predictions returned from Vertex AI');
-        }
+        if (!predictions || predictions.length === 0) throw new Error('No predictions returned');
 
         const predictionResult = helpers.fromValue(predictions[0] as any) as any;
-
-        if (!predictionResult?.embeddings?.values) {
-            throw new Error('Invalid response structure: missing embeddings.values');
-        }
+        if (!predictionResult?.embeddings?.values) throw new Error('Invalid response structure');
 
         return predictionResult.embeddings.values as number[];
     }
 
     private ensureInitialized(): void {
         if (!this.initialized || !this.client) {
-            throw new Error('VertexEmbeddingProvider not ready. Check logs for initialization errors.');
+            throw new Error('VertexEmbeddingProvider not ready');
         }
     }
 

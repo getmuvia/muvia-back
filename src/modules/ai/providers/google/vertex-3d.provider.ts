@@ -14,18 +14,12 @@ export class Vertex3DProvider implements IScan3DProvider {
     constructor(private readonly configService: ConfigService) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? 'itera-484104';
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-
         this.containerUri = `us-central1-docker.pkg.dev/${this.projectId}/itera-3d-repo/worker:v1`;
     }
 
-    /**
-     * Lanza un trabajo de entrenamiento en Vertex AI para convertir video a 3D.
-     * @param videoFilename El nombre del archivo en la carpeta inputs/ (ej: "silla.mp4")
-     */
     async start3DScan(videoFilename: string): Promise<Scan3DResult> {
-        this.logger.log(`🚀 Iniciando Escaneo 3D para: ${videoFilename}`);
+        this.logger.log(`🚀 Starting 3D Scan: ${videoFilename}`);
 
-        // Especificaciones del Hardware (Usando tu cuota T4)
         const workerPoolSpecs = [{
             machineSpec: {
                 machineType: 'g2-standard-4',
@@ -46,8 +40,7 @@ export class Vertex3DProvider implements IScan3DProvider {
             displayName: `3d-scan-${Date.now()}`,
             jobSpec: {
                 workerPoolSpecs,
-                // Límite de seguridad: Si tarda más de 1 hora, se cancela para no gastar dinero
-                scheduling: { timeout: { seconds: 3600 } } 
+                scheduling: { timeout: { seconds: 3600 } }
             },
         };
 
@@ -60,22 +53,16 @@ export class Vertex3DProvider implements IScan3DProvider {
 
         try {
             const [response] = await jobClient.createCustomJob({ parent, customJob });
-            const jobId = response.name.split('/').pop(); 
-            
-            this.logger.log(`✅ Job Creado con Éxito: ${jobId}`);
-            
-            // Calculamos la URL donde aparecerá el modelo (Optimistic URL)
-            // Asume que el worker guarda en outputs/NOMBRE.glb
+            const jobId = response.name.split('/').pop();
+
+            this.logger.log(`✅ Job Created: ${jobId}`);
+
             const outputName = videoFilename.replace(/\.(mp4|mov|avi)$/i, '') + '.glb';
             const outputUrl = `https://storage.googleapis.com/${this.bucketName}/outputs/${outputName}`;
 
-            return {
-                jobId,
-                status: 'PENDING', // El frontend deberá consultar el estado
-                outputUrl
-            };
+            return { jobId, status: 'PENDING', outputUrl };
         } catch (error) {
-            this.logger.error(`❌ Fallo al crear Custom Job: ${error.message}`);
+            this.logger.error(`❌ Failed to create Custom Job: ${error.message}`);
             throw error;
         }
     }
