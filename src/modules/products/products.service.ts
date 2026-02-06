@@ -11,6 +11,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
+import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { EmbeddingService } from '../ai/services/embedding/embedding.service';
 
 @Injectable()
@@ -31,11 +32,11 @@ export class ProductsService {
 
     try {
       console.log(`🧠 Generando embedding para producto ${savedProduct.id}...`);
-      await this.triggerEmbeddingGeneration(savedProduct.id); 
+      await this.triggerEmbeddingGeneration(savedProduct.id);
       console.log(`✅ Embedding generado correctamente.`);
-  } catch (error) {
+    } catch (error) {
       console.error(`❌ Falló la IA, pero el producto se guardó:`, error);
-  }
+    }
 
     if (assets?.length) {
       await this.createAssets(savedProduct.id, assets);
@@ -141,6 +142,27 @@ export class ProductsService {
     }
 
     await this.assetRepository.remove(asset);
+  }
+
+  async updateAsset(
+    productId: string,
+    assetId: string,
+    sellerId: string,
+    dto: UpdateProductAssetDto,
+  ): Promise<ProductAsset> {
+    const product = await this.findOne(productId);
+    this.validateOwnership(product, sellerId);
+
+    const asset = await this.assetRepository.findOne({
+      where: { id: assetId, productId },
+    });
+
+    if (!asset) {
+      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+    }
+
+    Object.assign(asset, dto);
+    return this.assetRepository.save(asset);
   }
 
   async setPrimaryAsset(productId: string, assetId: string, sellerId: string): Promise<void> {

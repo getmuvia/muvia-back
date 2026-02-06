@@ -15,6 +15,7 @@ import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
+import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -109,6 +110,18 @@ export class ProductsController {
     @CurrentUser('id') sellerId: string,
   ) {
     return this.productsService.removeAsset(productId, assetId, sellerId);
+  }
+
+  @Patch(':id/assets/:assetId')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.VENDOR)
+  updateAsset(
+    @Param('id', ParseUUIDPipe) productId: string,
+    @Param('assetId', ParseUUIDPipe) assetId: string,
+    @CurrentUser('id') sellerId: string,
+    @Body() updateAssetDto: UpdateProductAssetDto,
+  ) {
+    return this.productsService.updateAsset(productId, assetId, sellerId, updateAssetDto);
   }
 
   @Patch(':id/assets/:assetId/primary')
