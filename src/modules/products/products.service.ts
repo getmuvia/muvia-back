@@ -4,7 +4,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, In } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
@@ -12,6 +12,7 @@ import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
 import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
+import { SyncProductAssetDto } from './dto/sync-product-asset.dto';
 import { EmbeddingService } from '../ai/services/embedding/embedding.service';
 
 @Injectable()
@@ -101,14 +102,53 @@ export class ProductsService {
     const product = await this.findOne(id);
     this.validateOwnership(product, sellerId);
 
-    Object.assign(product, dto);
+    const { assets, ...productData } = dto;
+
+    Object.assign(product, productData);
     await this.productRepository.save(product);
+
+    if (assets !== undefined) {
+      await this.syncAssets(id, assets);
+    }
 
     if (this.shouldRegenerateEmbedding(dto)) {
       this.triggerEmbeddingGeneration(id);
     }
 
     return this.findOne(id);
+  }
+
+  private async syncAssets(productId: string, assets: SyncProductAssetDto[]): Promise<void> {
+    const existingAssets = await this.assetRepository.find({ where: { productId } });
+    const existingIds = existingAssets.map(a => a.id);
+    const incomingIds = assets.filter(a => a.id).map(a => a.id);
+
+    const idsToDelete = existingIds.filter(id => !incomingIds.includes(id));
+    if (idsToDelete.length > 0) {
+      await this.assetRepository.delete({ id: In(idsToDelete), productId });
+    }
+
+    for (let i = 0; i < assets.length; i++) {
+      const assetDto = assets[i];
+      if (assetDto.id) {
+        await this.assetRepository.update(
+          { id: assetDto.id, productId },
+          {
+            url: assetDto.url,
+            type: assetDto.type,
+            isPrimary: i === 0 ? true : assetDto.isPrimary ?? false,
+            metadata: assetDto.metadata as any,
+          },
+        );
+      } else {
+        const newAsset = this.assetRepository.create({
+          ...assetDto,
+          productId,
+          isPrimary: i === 0 ? true : assetDto.isPrimary ?? false,
+        });
+        await this.assetRepository.save(newAsset);
+      }
+    }
   }
 
   async remove(id: string, sellerId: string): Promise<void> {
