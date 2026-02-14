@@ -19,7 +19,7 @@ import { VALIDATION } from '../constants';
  *
  * @example
  * {
- *   "queries": ["sofá nórdico gris", "mesa de centro vidrio"],
+ *   "queries": ["gray nordic sofa", "glass coffee table"],
  *   "limit": 5,
  *   "threshold": 0.5
  * }
@@ -29,7 +29,7 @@ export class SearchQueryDto {
      * Natural language queries to search for.
      * Each query is converted to an embedding and matched against product vectors.
      *
-     * @example ["sofá nórdico gris", "mesa de centro vidrio"]
+    * @example ["gray nordic sofa", "glass coffee table"]
      * @minItems 1
      * @maxItems 10
      */

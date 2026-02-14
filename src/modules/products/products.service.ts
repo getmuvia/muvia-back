@@ -32,11 +32,11 @@ export class ProductsService {
     const savedProduct = await this.productRepository.save(product);
 
     try {
-      console.log(`🧠 Generando embedding para producto ${savedProduct.id}...`);
+      console.log(`🧠 Generating embedding for product ${savedProduct.id}...`);
       await this.triggerEmbeddingGeneration(savedProduct.id);
-      console.log(`✅ Embedding generado correctamente.`);
+      console.log(`✅ Embedding generated successfully.`);
     } catch (error) {
-      console.error(`❌ Falló la IA, pero el producto se guardó:`, error);
+      console.error(`❌ AI failed, but the product was saved:`, error);
     }
 
     if (assets?.length) {

@@ -12,19 +12,19 @@ export class Scan3dService {
     ) {}
 
     async createScanJob(dto: CreateScan3dDto) {
-        this.logger.log(`🎥 Solicitud de escaneo 3D recibida para: ${dto.videoFilename}`);
+        this.logger.log(`🎥 3D scan request received for: ${dto.videoFilename}`);
         
-        // Aquí podrías añadir lógica extra:
-        // - Verificar si el video realmente existe en Storage antes de gastar dinero.
-        // - Guardar el estado "PENDING" en tu base de datos para mostrárselo al usuario.
+        // You could add extra logic here:
+        // - Verify the video actually exists in Storage before spending money.
+        // - Save the "PENDING" status in your database to display it to the user.
         
         const result = await this.scan3DProvider.start3DScan(dto.videoFilename);
         
         return {
             success: true,
-            message: 'Trabajo de escaneo 3D iniciado correctamente',
+            message: '3D scan job started successfully',
             jobId: result.jobId,
-            estimatedTime: '15-20 minutos',
+            estimatedTime: '15-20 minutes',
 
             futureDownloadUrl: result.outputUrl 
         };
