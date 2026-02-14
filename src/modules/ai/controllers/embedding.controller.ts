@@ -3,7 +3,7 @@ import { EmbeddingService } from '../services/embedding/embedding.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
-import { UserRole } from '../../users/interfaces/user-role';
+import { UserRole } from '../../../common/enums/user-role.enum';
 
 /**
  * Admin controller for embedding management operations.

@@ -1,7 +1,7 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { VectorService } from '../vector/vector.service';
 import { ProductVectorRepository } from '../../repositories/product-vector.repository';
-import { ProductsService } from '../../../products/products.service';
+import { ProductLexicalRepository } from '../../repositories/product-lexical.repository';
 import { SearchQueryDto } from '../../dto/search-query.dto';
 import { HybridSearchDto } from '../../dto/hybrid-search.dto';
 import {
@@ -24,8 +24,7 @@ export class SearchService {
     constructor(
         private readonly vectorService: VectorService,
         private readonly productVectorRepo: ProductVectorRepository,
-        @Inject(forwardRef(() => ProductsService))
-        private readonly productsService: ProductsService,
+        private readonly productLexicalRepo: ProductLexicalRepository,
     ) { }
 
     /**
@@ -76,16 +75,12 @@ export class SearchService {
     }
 
     /**
-     * Performs lexical search using ProductsService (ILIKE on title/description).
+     * Performs lexical search (ILIKE on title/description).
+     * Implemented inside AI module to avoid a circular dependency with ProductsModule.
      */
     private async performLexicalSearch(query: string, limit: number): Promise<Product[]> {
         try {
-            const result = await this.productsService.findAll({
-                search: query,
-                limit,
-                page: 1,
-            });
-            return result.data;
+            return await this.productLexicalRepo.search(query, limit);
         } catch (error) {
             this.logger.error(`Lexical search failed: ${error.message}`);
             return [];
