@@ -75,9 +75,9 @@ Bonus:
 
 ### Word Matching Rules
 
-1. **Stopwords filtered**: Words with ≤2 characters are ignored ("de", "la", "el")
+1. **Stopwords filtered**: Words with ≤2 characters are ignored ("of", "an", "to")
 2. **Word boundaries**: Uses regex `\b` to match complete words only
-3. **Case insensitive**: "Silla" matches "silla"
+3. **Case insensitive**: "Chair" matches "chair"
 4. **Duplicate prevention**: Repeated words in query count once
 
 ---

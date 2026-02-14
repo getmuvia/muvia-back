@@ -1,7 +1,6 @@
-import { Module, forwardRef } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Product } from '../products/entities/product.entity';
-import { ProductsModule } from '../products/products.module';
 
 // Core utilities
 import { RetryService } from './core/retry';
@@ -9,6 +8,7 @@ import { ImageResolverService } from './core/image';
 
 // Repository
 import { ProductVectorRepository } from './repositories/product-vector.repository';
+import { ProductLexicalRepository } from './repositories/product-lexical.repository';
 
 // Services
 import { VectorService } from './services/vector/vector.service';
@@ -48,7 +48,6 @@ import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } f
 @Module({
     imports: [
         TypeOrmModule.forFeature([Product]),
-        forwardRef(() => ProductsModule),
     ],
 
     controllers: [
@@ -63,6 +62,7 @@ import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } f
         ImageResolverService,
 
         ProductVectorRepository,
+        ProductLexicalRepository,
 
         VectorService,
         EmbeddingService,

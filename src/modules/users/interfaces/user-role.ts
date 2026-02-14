@@ -1,5 +1,1 @@
-export enum UserRole {
-  ADMIN = 'admin',
-  VENDOR = 'vendor',
-  CONSUMER = 'consumer',
-}
+export { UserRole } from '../../../common/enums/user-role.enum';

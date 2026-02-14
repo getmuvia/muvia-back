@@ -28,8 +28,8 @@ The previous search implementation used SQL `ILIKE` queries, which have several 
 | Issue | Example |
 |-------|---------|
 | **No semantic understanding** | Searching "furniture for sitting" won't find "chair" or "sofa" |
-| **No typo tolerance** | "sofá" won't match "sofa" |
-| **Language barriers** | "couch" won't match "sofá" |
+| **No typo tolerance** | "sofaa" won't match "sofa" |
+| **Language barriers** | "couch" won't match "sofa" |
 | **No context awareness** | "modern living room table" requires exact keyword matches |
 
 ### User Requirement
@@ -37,9 +37,9 @@ The previous search implementation used SQL `ILIKE` queries, which have several 
 The user needed an intelligent search that accepts natural language descriptions like:
 ```json
 [
-  "sofá de tres plazas estilo nórdico color gris claro con patas de madera",
-  "mesa de centro redonda de vidrio y metal negro minimalista",
-  "alfombra grande de yute textura natural"
+  "light gray three-seat nordic-style sofa with wooden legs",
+  "round glass coffee table with minimalist black metal frame",
+  "large natural jute rug"
 ]
 ```
 
@@ -52,7 +52,7 @@ And returns semantically relevant products, even if they don't contain those exa
 ```
 ┌─────────────────┐    ┌───────────────────────┐    ┌─────────────────┐
 │   User Query    │───▶│VertexEmbeddingProvider│───▶│   Vertex AI     │
-│ "sofá nórdico"  │    │   (NestJS Provider)   │    │ text-embedding  │
+│ "nordic sofa"   │    │   (NestJS Provider)   │    │ text-embedding  │
 └─────────────────┘    └───────────────────────┘    └─────────────────┘
                                 │
                                 ▼
@@ -220,8 +220,8 @@ Performs batch semantic search on products.
 ```json
 {
   "queries": [
-    "sofá de tres plazas estilo nórdico color gris claro",
-    "mesa de centro redonda de vidrio"
+    "light gray three-seat nordic-style sofa",
+    "round glass coffee table"
   ],
   "limit": 5,
   "threshold": 0.5
@@ -238,11 +238,11 @@ Performs batch semantic search on products.
 ```json
 [
   {
-    "query": "sofá de tres plazas estilo nórdico color gris claro",
+    "query": "light gray three-seat nordic-style sofa",
     "products": [
       {
         "id": "uuid-here",
-        "title": "Sofá Escandinavo 3 Puestos",
+        "title": "Scandinavian 3-Seater Sofa",
         "description": "...",
         "price": 1299.99,
         "similarity": 0.89,
@@ -317,7 +317,7 @@ WHERE table_name = 'products' AND column_name = 'embedding';
 curl -X POST http://localhost:3000/ai/search \
   -H "Content-Type: application/json" \
   -d '{
-    "queries": ["silla de oficina ergonómica"]
+    "queries": ["ergonomic office chair"]
   }'
 ```
 
@@ -328,8 +328,8 @@ curl -X POST http://localhost:3000/ai/search \
   -H "Content-Type: application/json" \
   -d '{
     "queries": [
-      "mueble para guardar ropa",
-      "lámpara de pie moderna"
+      "storage cabinet for clothes",
+      "modern floor lamp"
     ],
     "limit": 10,
     "threshold": 0.6
