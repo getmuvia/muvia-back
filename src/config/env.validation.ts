@@ -11,8 +11,10 @@ export const envValidationSchema = Joi.object({
   DB_PASSWORD: Joi.string().required(),
   DB_NAME: Joi.string().required(),
 
-  JWT_SECRET: Joi.string().required(),
+  JWT_SECRET: Joi.string().min(32).required(),
   JWT_EXPIRATION: Joi.string().default('24h'),
+  JWT_ISSUER: Joi.string().default('muvia-api'),
+  JWT_AUDIENCE: Joi.string().default('muvia-client'),
 
   // Google Cloud Platform - Vertex AI
   GCP_PROJECT_ID: Joi.string().optional(),

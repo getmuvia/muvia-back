@@ -37,8 +37,10 @@ DB_USERNAME=postgres
 DB_PASSWORD=CHANGE_ME
 DB_NAME=postgres
 
-JWT_SECRET=CHANGE_ME_SUPER_SECRET
+JWT_SECRET=CHANGE_ME_WITH_AT_LEAST_32_CHARACTERS
 JWT_EXPIRATION=24h
+JWT_ISSUER=muvia-api
+JWT_AUDIENCE=muvia-client
 
 GOOGLE_STORAGE_BUCKET=your-bucket-name
 
@@ -79,8 +81,10 @@ This project validates core env vars with Nest Config + Joi and also reads addit
 
 ### Security
 
-- `JWT_SECRET`: secret key used to sign access tokens
+- `JWT_SECRET`: secret key used to sign access tokens (minimum 32 characters)
 - `JWT_EXPIRATION`: token TTL (examples: `24h`, `12h`, `7d`)
+- `JWT_ISSUER`: expected token issuer (default: `muvia-api`)
+- `JWT_AUDIENCE`: expected token audience (default: `muvia-client`)
 
 ### Google Cloud Storage
 

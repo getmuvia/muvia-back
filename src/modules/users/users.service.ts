@@ -14,6 +14,7 @@ import { UpdateUserDto } from './dto/update-user.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { PasswordService } from '../../common/services/password.service';
 import { UserRole } from './interfaces/user-role';
+import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @Injectable()
 export class UsersService {
@@ -70,6 +71,23 @@ export class UsersService {
       where: { email },
       select: ['id', 'email', 'passwordHash', 'role'],
     });
+  }
+
+  async findAuthIdentityById(id: string): Promise<AuthenticatedUser | null> {
+    const user = await this.userRepository.findOne({
+      where: { id },
+      select: ['id', 'email', 'role'],
+    });
+
+    if (!user) {
+      return null;
+    }
+
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
   }
 
   async findOneByEmailWithProfile(email: string): Promise<User | null> {

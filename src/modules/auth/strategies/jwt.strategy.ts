@@ -1,33 +1,40 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import type { ConfigType } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { ConfigService } from '@nestjs/config';
-import { JwtPayload } from '../../../common/interfaces/jwt-payload.interface';
+import { UsersService } from '../../users/users.service';
+import { AuthenticatedUser } from '../../../common/interfaces/authenticated-user.interface';
+import { authConfig } from '../config/auth.config';
+import { JwtPayload } from '../interfaces/jwt-payload.interface';
+import { AuthMapper } from '../mappers/auth.mapper';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
-    constructor(configService: ConfigService) {
-        const secret = configService.get<string>('JWT_SECRET');
-        if (!secret) {
-            throw new Error('JWT_SECRET is not configured');
-        }
+  constructor(
+    @Inject(authConfig.KEY) config: ConfigType<typeof authConfig>,
+    private readonly usersService: UsersService,
+  ) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: config.jwt.secret,
+      issuer: config.jwt.issuer,
+      audience: config.jwt.audience,
+      algorithms: ['HS256'],
+    });
+  }
 
-        super({
-            jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-            ignoreExpiration: false,
-            secretOrKey: secret,
-        });
+  async validate(payload: JwtPayload): Promise<AuthenticatedUser> {
+    if (!payload.sub) {
+      throw new UnauthorizedException('Invalid token payload');
     }
 
-    validate(payload: JwtPayload) {
-        if (!payload.sub || !payload.email) {
-            throw new UnauthorizedException('Invalid token payload');
-        }
+    const user = await this.usersService.findAuthIdentityById(payload.sub);
 
-        return {
-            id: payload.sub,
-            email: payload.email,
-            role: payload.role,
-        };
+    if (!user) {
+      throw new UnauthorizedException('User is no longer available');
     }
+
+    return AuthMapper.toAuthenticatedUser(user);
+  }
 }
