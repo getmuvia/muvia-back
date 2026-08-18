@@ -51,10 +51,6 @@ GCP_IMAGEN_MODEL=gemini-3-pro-image-preview
 
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=text-embedding-004
-
-# Optional (only if you wire Azure storage provider)
-AZURE_STORAGE_CONNECTION_STRING=dummy
-AZURE_CONTAINER_NAME=dummy
 ```
 
 ### 4) Run in development
@@ -99,11 +95,6 @@ This project validates core env vars with Nest Config + Joi and also reads addit
 - `GCP_IMAGEN_MODEL`: model for generated images / virtual staging
 - `GCP_EMBEDDING_LOCATION`: embeddings location (recommended `us-central1`)
 - `GCP_EMBEDDING_MODEL`: embedding model (recommended `text-embedding-004`)
-
-### Azure (Optional)
-
-- `AZURE_STORAGE_CONNECTION_STRING`
-- `AZURE_CONTAINER_NAME`
 
 Note: the project currently uses Google Cloud Storage by default in the files module.
 
@@ -193,7 +184,6 @@ npm run lint
 ## Deployment Notes
 
 - Primary target: Google Cloud (Cloud Run + Cloud SQL + GCS + Vertex/Gemini)
-- Other clouds (Azure/AWS/etc.) are possible, but require equivalent services and provider wiring.
 
 ---
 

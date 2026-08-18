@@ -64,7 +64,6 @@ export class GoogleCloudStorageProvider implements StorageProvider {
     async delete(fileKey: string): Promise<void> {
         try {
             const fileRef = this.bucket.file(fileKey);
-            // 'ignoreNotFound' es el equivalente a deleteIfExists de Azure
             await fileRef.delete({ ignoreNotFound: true });
             this.logger.log(`File deleted from GCS: ${fileKey}`);
         } catch (error) {
