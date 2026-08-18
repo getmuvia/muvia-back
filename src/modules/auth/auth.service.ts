@@ -1,49 +1,43 @@
-import {
-  Injectable,
-  UnauthorizedException,
-  ConflictException,
-} from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import { PasswordService } from '../../common/services/password.service';
 import { LoginDto } from './dto/login.dto';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { AuthResponseDto } from './dto/auth-response.dto';
-import { JwtPayload } from '../../common/interfaces/jwt-payload.interface';
 import { User } from '../users/entities/user.entity';
+import { RegisterDto } from './dto/register.dto';
+import { AuthResponse } from './responses/auth.response';
+import { TokenService } from './services/token.service';
+import { AuthMapper } from './mappers/auth.mapper';
 
-import { UserPayload } from './dto/auth-response.dto';
+const DUMMY_PASSWORD_HASH =
+  '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
 
 @Injectable()
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
-    private readonly jwtService: JwtService,
     private readonly passwordService: PasswordService,
-  ) { }
+    private readonly tokenService: TokenService,
+  ) {}
 
-  async register(createUserDto: CreateUserDto): Promise<AuthResponseDto> {
-    const user = await this.usersService.create(createUserDto);
-    return this.generateAuthResponse(user);
+  async register(registerDto: RegisterDto): Promise<AuthResponse> {
+    const user = await this.usersService.create({
+      ...registerDto,
+      email: this.normalizeEmail(registerDto.email),
+    });
+
+    return this.createAuthResponse(user);
   }
 
-  async login(loginDto: LoginDto): Promise<AuthResponseDto> {
+  async login(loginDto: LoginDto): Promise<AuthResponse> {
     const user = await this.validateCredentials(loginDto.email, loginDto.password);
-    return this.generateAuthResponse(user);
-  }
-
-  async validateUser(email: string, password: string): Promise<User | null> {
-    try {
-      return await this.validateCredentials(email, password);
-    } catch {
-      return null;
-    }
+    return this.createAuthResponse(user);
   }
 
   private async validateCredentials(email: string, password: string): Promise<User> {
-    const user = await this.usersService.findOneByEmail(email);
+    const user = await this.usersService.findOneByEmail(this.normalizeEmail(email));
 
     if (!user) {
+      await this.passwordService.compare(password, DUMMY_PASSWORD_HASH);
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -56,25 +50,14 @@ export class AuthService {
     return user;
   }
 
+  private async createAuthResponse(user: User): Promise<AuthResponse> {
+    const authenticatedUser = AuthMapper.toAuthenticatedUser(user);
+    const accessToken = await this.tokenService.generateAccessToken(authenticatedUser);
 
-  async checkStatus(user: UserPayload): Promise<AuthResponseDto> {
-    return this.generateAuthResponse(user);
+    return AuthMapper.toAuthResponse(accessToken, authenticatedUser);
   }
 
-  private generateAuthResponse(user: UserPayload): AuthResponseDto {
-    const payload: JwtPayload = {
-      sub: user.id,
-      email: user.email,
-      role: user.role,
-    };
-
-    return {
-      accessToken: this.jwtService.sign(payload),
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      },
-    };
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
   }
 }

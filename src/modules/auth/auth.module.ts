@@ -1,35 +1,34 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
-import { ConfigModule, ConfigService } from '@nestjs/config';
+import { ConfigModule, ConfigType } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { UsersModule } from '../users/users.module';
+import { authConfig } from './config/auth.config';
+import { TokenService } from './services/token.service';
 
 @Module({
   imports: [
     UsersModule,
     PassportModule.register({ defaultStrategy: 'jwt' }),
+    ConfigModule.forFeature(authConfig),
     JwtModule.registerAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (configService: ConfigService) => {
-        const secret = configService.get<string>('JWT_SECRET');
-        if (!secret) {
-          throw new Error('JWT_SECRET is not configured');
-        }
-        return {
-          secret,
-          signOptions: {
-            expiresIn: '24h' as const,
-          },
-        };
-      },
+      imports: [ConfigModule.forFeature(authConfig)],
+      inject: [authConfig.KEY],
+      useFactory: (config: ConfigType<typeof authConfig>) => ({
+        secret: config.jwt.secret,
+        signOptions: {
+          expiresIn: config.jwt.expiresIn,
+          issuer: config.jwt.issuer,
+          audience: config.jwt.audience,
+          algorithm: 'HS256',
+        },
+      }),
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService, JwtModule],
+  providers: [AuthService, TokenService, JwtStrategy],
 })
-export class AuthModule { }
+export class AuthModule {}

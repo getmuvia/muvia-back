@@ -1,35 +1,24 @@
-import { Controller, Post, Body, Get, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { Body, Controller, HttpCode, HttpStatus, Post } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { CreateUserDto } from '../users/dto/create-user.dto';
-import { AuthResponseDto, UserPayload } from './dto/auth-response.dto';
-import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { RegisterDto } from './dto/register.dto';
+import { AuthResponse } from './responses/auth.response';
+import { Public } from '../../common/decorators/public.decorator';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) { }
+  constructor(private readonly authService: AuthService) {}
 
   @Post('register')
-  async register(@Body() createUserDto: CreateUserDto): Promise<AuthResponseDto> {
-    return this.authService.register(createUserDto);
+  @Public()
+  register(@Body() registerDto: RegisterDto): Promise<AuthResponse> {
+    return this.authService.register(registerDto);
   }
 
   @Post('login')
+  @Public()
   @HttpCode(HttpStatus.OK)
-  async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
+  login(@Body() loginDto: LoginDto): Promise<AuthResponse> {
     return this.authService.login(loginDto);
-  }
-
-  @Get('check-status')
-  @UseGuards(JwtAuthGuard)
-  checkStatus(@CurrentUser() user: UserPayload) {
-    return this.authService.checkStatus(user);
-  }
-
-  @Get('profile')
-  @UseGuards(JwtAuthGuard)
-  getProfile(@CurrentUser() user: any) {
-    return user;
   }
 }

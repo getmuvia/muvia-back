@@ -19,11 +19,12 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { UserRole } from './interfaces/user-role';
 import { Public } from '../../common/decorators/public.decorator';
+import type { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 
 @Controller('users')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class UsersController {
-  constructor(private readonly usersService: UsersService) { }
+  constructor(private readonly usersService: UsersService) {}
 
   @Post()
   @Roles(UserRole.ADMIN)
@@ -38,7 +39,7 @@ export class UsersController {
   }
 
   @Get('me')
-  getMe(@CurrentUser() user: any) {
+  getMe(@CurrentUser() user: AuthenticatedUser) {
     return this.usersService.findOne(user.id);
   }
 
@@ -49,12 +50,18 @@ export class UsersController {
   }
 
   @Patch('me')
-  updateMe(@CurrentUser() user: any, @Body() updateUserDto: UpdateUserDto) {
+  updateMe(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() updateUserDto: UpdateUserDto,
+  ) {
     return this.usersService.update(user.id, updateUserDto);
   }
 
   @Patch('me/password')
-  changePassword(@CurrentUser() user: any, @Body() changePasswordDto: ChangePasswordDto) {
+  changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() changePasswordDto: ChangePasswordDto,
+  ) {
     return this.usersService.changePassword(user.id, changePasswordDto);
   }
 
