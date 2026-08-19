@@ -7,14 +7,18 @@ const aiplatform = require('@google-cloud/aiplatform');
 export class Vertex3DProvider implements IScan3DProvider {
     private readonly logger = new Logger(Vertex3DProvider.name);
     private readonly projectId: string;
-    private readonly location: string = 'us-central1';
+    private readonly location: string;
     private readonly bucketName: string;
     private readonly containerUri: string;
 
     constructor(private readonly configService: ConfigService) {
-        this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? 'itera-484104';
+        this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
+        this.location = this.configService.get<string>('GCP_3D_LOCATION', 'us-central1');
         this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
-        this.containerUri = `us-central1-docker.pkg.dev/${this.projectId}/itera-3d-repo/worker:v1`;
+        this.containerUri = this.configService.get<string>(
+            'GCP_3D_WORKER_IMAGE_URI',
+            `${this.location}-docker.pkg.dev/${this.projectId}/muvia/muvia-3d-worker:latest`,
+        );
     }
 
     async start3DScan(videoFilename: string): Promise<Scan3DResult> {

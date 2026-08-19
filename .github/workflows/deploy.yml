@@ -1,0 +1,112 @@
+name: Build and deploy
+
+on:
+  pull_request:
+    branches: [develop]
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build application
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Build container
+        if: github.event_name == 'pull_request'
+        run: docker build -t muvia-back:ci .
+
+  deploy:
+    name: Deploy demo
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/develop'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: demo
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+      REGION: ${{ vars.GCP_REGION }}
+      REPOSITORY: ${{ vars.GCP_ARTIFACT_REPOSITORY }}
+      SERVICE: ${{ vars.GCP_CLOUD_RUN_SERVICE }}
+      MIGRATION_JOB: ${{ vars.GCP_MIGRATION_JOB }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - name: Set up Google Cloud CLI
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Configure Docker authentication
+        run: gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+
+      - name: Build and push image
+        id: image
+        shell: bash
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/muvia-back:${GITHUB_SHA}"
+          docker build -t "${IMAGE}" .
+          docker push "${IMAGE}"
+          DIGEST="$(gcloud artifacts docker images describe "${IMAGE}" --format='value(image_summary.digest)')"
+          echo "uri=${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/muvia-back@${DIGEST}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run database migrations
+        run: |
+          gcloud run jobs update "${MIGRATION_JOB}" \
+            --image "${{ steps.image.outputs.uri }}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --quiet
+          gcloud run jobs execute "${MIGRATION_JOB}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --wait
+
+      - name: Deploy Cloud Run revision
+        run: |
+          gcloud run services update "${SERVICE}" \
+            --image "${{ steps.image.outputs.uri }}" \
+            --region "${REGION}" \
+            --project "${PROJECT_ID}" \
+            --quiet
+
+      - name: Check deployment health
+        shell: bash
+        run: |
+          SERVICE_URL="$(gcloud run services describe "${SERVICE}" --region "${REGION}" --project "${PROJECT_ID}" --format='value(status.url)')"
+          for attempt in {1..12}; do
+            if curl --fail --silent --show-error "${SERVICE_URL}/health"; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1

@@ -57,7 +57,7 @@ export class Product {
      * Vector embedding for semantic search (768 dimensions from Vertex AI text-embedding-004).
      * Requires pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
      */
-    @Column('vector', { nullable: true })
+    @Column('vector', { length: 768, nullable: true })
     embedding: string;
 
     @CreateDateColumn()

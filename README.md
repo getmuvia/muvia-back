@@ -30,6 +30,7 @@ Create a `.env` file in the project root and start with this template:
 ```env
 NODE_ENV=development
 PORT=3000
+CORS_ALLOWED_ORIGINS=http://localhost:3000
 
 DB_HOST=127.0.0.1
 DB_PORT=5432
@@ -53,6 +54,9 @@ GCP_IMAGEN_MODEL=gemini-3-pro-image-preview
 
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=text-embedding-004
+
+GCP_3D_LOCATION=us-central1
+GCP_3D_WORKER_IMAGE_URI=us-central1-docker.pkg.dev/PROJECT_ID/muvia/muvia-3d-worker:latest
 ```
 
 ### 4) Run in development
@@ -85,6 +89,7 @@ This project validates core env vars with Nest Config + Joi and also reads addit
 - `JWT_EXPIRATION`: token TTL (examples: `24h`, `12h`, `7d`)
 - `JWT_ISSUER`: expected token issuer (default: `muvia-api`)
 - `JWT_AUDIENCE`: expected token audience (default: `muvia-client`)
+- `CORS_ALLOWED_ORIGINS`: comma-separated browser origins allowed to call the API
 
 ### Google Cloud Storage
 
@@ -188,6 +193,9 @@ npm run lint
 ## Deployment Notes
 
 - Primary target: Google Cloud (Cloud Run + Cloud SQL + GCS + Vertex/Gemini)
+- Infrastructure is managed in the separate `muvia-infra` repository.
+- Pushes to `develop` deploy the single portfolio environment after the required GitHub variables are configured.
+- See [`doc/deployment/README.md`](doc/deployment/README.md) for the complete deployment flow.
 
 ---
 
