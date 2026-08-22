@@ -46,7 +46,13 @@ export class ProductsService {
     return this.findOne(savedProduct.id);
   }
 
-  async findAll(filterDto: ProductFilterDto): Promise<{ data: Product[]; total: number }> {
+  async findAll(filterDto: ProductFilterDto): Promise<{
+    data: Product[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+  }> {
     const { page = 1, limit = 20, ...filters } = filterDto;
     const skip = (page - 1) * limit;
 
@@ -57,7 +63,13 @@ export class ProductsService {
     queryBuilder.skip(skip).take(limit);
 
     const [data, total] = await queryBuilder.getManyAndCount();
-    return { data, total };
+    return {
+      data,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    };
   }
 
   async findOne(id: string): Promise<Product> {
