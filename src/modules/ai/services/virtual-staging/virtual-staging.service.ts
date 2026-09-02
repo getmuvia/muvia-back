@@ -1,13 +1,35 @@
-import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common';
+import {
+    Injectable,
+    Inject,
+    Logger,
+    BadRequestException,
+    HttpException,
+    HttpStatus,
+    NotFoundException,
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import type { IVisionProvider, RoomAnalysisResult } from '../../interfaces/vision-provider.interface';
 import { VISION_PROVIDER } from '../../interfaces/vision-provider.interface';
 import type { IImageGenerator } from '../../interfaces/image-generator.interface';
 import { IMAGE_GENERATOR } from '../../interfaces/image-generator.interface';
 import { SearchService } from '../search/search.service';
 import type { HybridProductResult } from '../../interfaces/search-result.interface';
-import type { VirtualStagingResponseDto, VirtualStagingRequestDto } from '../../dto/virtual-staging.dto';
+import type {
+    VirtualStagingQuotaDto,
+    VirtualStagingResponseDto,
+    VirtualStagingRequestDto,
+} from '../../dto/virtual-staging.dto';
 import { buildStagingPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
 import { VIRTUAL_STAGING } from '../../constants';
+import { User } from '../../../users/entities/user.entity';
+
+const DAILY_VIRTUAL_STAGING_LIMIT = 10;
+const QUOTA_TIME_ZONE = 'America/La_Paz';
+
+interface QuotaRow {
+    remaining: number | string;
+}
 
 /**
  * Virtual Staging Service
@@ -31,7 +53,36 @@ export class VirtualStagingService {
         private readonly imageGenerator: IImageGenerator,
 
         private readonly searchService: SearchService,
+
+        @InjectRepository(User)
+        private readonly userRepository: Repository<User>,
     ) { }
+
+    /**
+     * Returns the effective quota for the current Bolivia calendar day.
+     * An expired stored quota is exposed as a fresh daily allowance without a cron job.
+     */
+    async getQuota(userId: string): Promise<VirtualStagingQuotaDto> {
+        const rows = await this.userRepository.query<QuotaRow[]>(
+            `
+                SELECT CASE
+                    WHEN "virtualStagingQuotaDay" =
+                        (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+                    THEN "virtualStagingQuotaRemaining"
+                    ELSE $2
+                END AS "remaining"
+                FROM "users"
+                WHERE "id" = $3
+            `,
+            [QUOTA_TIME_ZONE, DAILY_VIRTUAL_STAGING_LIMIT, userId],
+        );
+
+        if (!rows[0]) {
+            throw new NotFoundException('User not found');
+        }
+
+        return this.buildQuota(rows[0].remaining);
+    }
 
     /**
      * Generates a staged room image with product recommendations.
@@ -40,43 +91,126 @@ export class VirtualStagingService {
      * @returns Staged image URL, room analysis, and product suggestions
      * @throws BadRequestException if no image source is provided
      */
-    async generateStagedRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
+    async generateStagedRoom(
+        dto: VirtualStagingRequestDto,
+        userId: string,
+    ): Promise<VirtualStagingResponseDto> {
         const startTime = Date.now();
 
         this.validateImageSource(dto);
-        this.logger.log(`Starting virtual staging...`);
+        const quota = await this.reserveQuota(userId);
 
-        // 1. Analyze room and find matching products
-        const analysis = await this.analyzeRoomWithUrlFallback(dto);
-        if (dto.preferredStyle) analysis.style = dto.preferredStyle;
+        try {
+            this.logger.log(`Starting virtual staging...`);
 
-        const maxProducts = dto.maxProducts ?? VIRTUAL_STAGING.DEFAULT_MAX_PRODUCTS;
-        const allProducts = await this.findMatchingProducts(analysis, maxProducts);
+            // 1. Analyze room and find matching products
+            const analysis = await this.analyzeRoomWithUrlFallback(dto);
+            if (dto.preferredStyle) analysis.style = dto.preferredStyle;
 
-        // 2. Filter to products with valid image URLs for visual reference
-        const visualProducts = this.filterVisualProducts(allProducts);
-        this.logger.debug(`Selected ${visualProducts.length} products for visual reference`);
+            const maxProducts = dto.maxProducts ?? VIRTUAL_STAGING.DEFAULT_MAX_PRODUCTS;
+            const allProducts = await this.findMatchingProducts(analysis, maxProducts);
 
-        // 3. Generate staged image using prompt builder
-        const prompt = this.buildPromptForStaging(analysis, visualProducts);
-        const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, visualProducts);
+            // 2. Filter to products with valid image URLs for visual reference
+            const visualProducts = this.filterVisualProducts(allProducts);
+            this.logger.debug(`Selected ${visualProducts.length} products for visual reference`);
 
-        const processingTimeMs = Date.now() - startTime;
-        this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
+            // 3. Generate staged image using prompt builder
+            const prompt = this.buildPromptForStaging(analysis, visualProducts);
+            const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, visualProducts);
 
-        return {
-            analysis,
-            suggestedProducts: visualProducts,
-            stagedImageUrl: generatedImage.imageUrl,
-            metadata: { processingTimeMs, productsFound: visualProducts.length },
-        };
+            const processingTimeMs = Date.now() - startTime;
+            this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
+
+            return {
+                analysis,
+                suggestedProducts: visualProducts,
+                stagedImageUrl: generatedImage.imageUrl,
+                quota,
+                metadata: { processingTimeMs, productsFound: visualProducts.length },
+            };
+        } catch (error) {
+            await this.refundQuotaSafely(userId);
+            throw error;
+        }
     }
 
     /**
      * @deprecated Use generateStagedRoom instead. Kept for backward compatibility.
      */
-    async stageRoom(dto: VirtualStagingRequestDto): Promise<VirtualStagingResponseDto> {
-        return this.generateStagedRoom(dto);
+    async stageRoom(
+        dto: VirtualStagingRequestDto,
+        userId: string,
+    ): Promise<VirtualStagingResponseDto> {
+        return this.generateStagedRoom(dto, userId);
+    }
+
+    /**
+     * Atomically reserves one generation. The first reservation on a new day
+     * resets the allowance and immediately consumes one use.
+     */
+    private async reserveQuota(userId: string): Promise<VirtualStagingQuotaDto> {
+        const rows = await this.userRepository.query<QuotaRow[]>(
+            `
+                UPDATE "users"
+                SET
+                    "virtualStagingQuotaRemaining" = CASE
+                        WHEN "virtualStagingQuotaDay" IS DISTINCT FROM
+                            (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+                        THEN $2 - 1
+                        ELSE "virtualStagingQuotaRemaining" - 1
+                    END,
+                    "virtualStagingQuotaDay" =
+                        (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+                WHERE "id" = $3
+                  AND (
+                      "virtualStagingQuotaDay" IS DISTINCT FROM
+                          (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+                      OR "virtualStagingQuotaRemaining" > 0
+                  )
+                RETURNING "virtualStagingQuotaRemaining" AS "remaining"
+            `,
+            [QUOTA_TIME_ZONE, DAILY_VIRTUAL_STAGING_LIMIT, userId],
+        );
+
+        if (!rows[0]) {
+            throw new HttpException(
+                'Has alcanzado el límite de 10 generaciones de hoy. Inténtalo nuevamente mañana.',
+                HttpStatus.TOO_MANY_REQUESTS,
+            );
+        }
+
+        return this.buildQuota(rows[0].remaining);
+    }
+
+    /** Returns a reserved generation when the AI workflow does not complete. */
+    private async refundQuotaSafely(userId: string): Promise<void> {
+        try {
+            await this.userRepository.query(
+                `
+                    UPDATE "users"
+                    SET "virtualStagingQuotaRemaining" = LEAST(
+                        $2,
+                        "virtualStagingQuotaRemaining" + 1
+                    )
+                    WHERE "id" = $3
+                      AND "virtualStagingQuotaDay" =
+                          (CURRENT_TIMESTAMP AT TIME ZONE $1)::date
+                `,
+                [QUOTA_TIME_ZONE, DAILY_VIRTUAL_STAGING_LIMIT, userId],
+            );
+        } catch (error) {
+            this.logger.error(
+                `Could not refund virtual staging quota for user ${userId}`,
+                error instanceof Error ? error.stack : undefined,
+            );
+        }
+    }
+
+    private buildQuota(remaining: number | string): VirtualStagingQuotaDto {
+        return {
+            limit: DAILY_VIRTUAL_STAGING_LIMIT,
+            remaining: Number(remaining),
+        };
     }
 
     /**

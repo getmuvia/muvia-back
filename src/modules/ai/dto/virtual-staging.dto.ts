@@ -99,6 +99,14 @@ export class VirtualStagingRequestDto {
     }
 }
 
+export interface VirtualStagingQuotaDto {
+    /** Maximum number of generations available per Bolivia calendar day. */
+    limit: number;
+
+    /** Number of generations still available today. */
+    remaining: number;
+}
+
 /**
  * Response DTO from virtual staging endpoint.
  *
@@ -126,6 +134,9 @@ export interface VirtualStagingResponseDto {
      * Hosted on Google Cloud Storage with long cache duration.
      */
     stagedImageUrl: string;
+
+    /** Updated quota after completing this generation. */
+    quota: VirtualStagingQuotaDto;
 
     /**
      * Processing metadata for monitoring and debugging.
