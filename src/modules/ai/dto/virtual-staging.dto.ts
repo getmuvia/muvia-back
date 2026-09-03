@@ -1,7 +1,6 @@
-import { IsOptional, IsString, IsIn, IsUrl, IsNumber, Min, Max, ValidateIf } from 'class-validator';
+import { IsOptional, IsString, IsIn, IsUrl, IsUUID } from 'class-validator';
 import type { RoomAnalysisResult } from '../interfaces/vision-provider.interface';
-import type { HybridProductResult } from '../interfaces/search-result.interface';
-import { DESIGN_STYLES, VALIDATION } from '../constants';
+import { DESIGN_STYLES } from '../constants';
 
 /**
  * Request DTO for virtual staging endpoint.
@@ -11,19 +10,29 @@ import { DESIGN_STYLES, VALIDATION } from '../constants';
  *
  * @example
  * // Using GCS storage key (recommended for uploaded images)
- * { "gcsStorageKey": "virtual-staging/temp/abc123.jpg" }
+ * {
+ *   "gcsStorageKey": "virtual-staging/temp/abc123.jpg",
+ *   "productId": "2ebbb0f8-6ef5-4bcb-9fcb-7e4afb1b418a"
+ * }
  *
  * // Using external URL
- * { "externalImageUrl": "https://example.com/room.jpg" }
+ * {
+ *   "externalImageUrl": "https://example.com/room.jpg",
+ *   "productId": "2ebbb0f8-6ef5-4bcb-9fcb-7e4afb1b418a"
+ * }
  *
  * // With preferences
  * {
  *   "gcsStorageKey": "virtual-staging/temp/abc123.jpg",
- *   "preferredStyle": "modern",
- *   "maxProducts": 5
+ *   "productId": "2ebbb0f8-6ef5-4bcb-9fcb-7e4afb1b418a",
+ *   "preferredStyle": "modern"
  * }
  */
 export class VirtualStagingRequestDto {
+    /** Catalog product explicitly selected by the user for this generation. */
+    @IsUUID()
+    productId: string;
+
     /**
      * Google Cloud Storage key for internally uploaded images.
      * Use this when the image was uploaded via `/files/upload-url` endpoint.
@@ -71,20 +80,6 @@ export class VirtualStagingRequestDto {
     preferredStyle?: string;
 
     /**
-     * Maximum number of products to suggest from the catalog.
-     * The actual visual reference images will be limited to 3.
-     *
-     * @default 4
-     * @minimum 1
-     * @maximum 20
-     */
-    @IsOptional()
-    @IsNumber()
-    @Min(1)
-    @Max(VALIDATION.MAX_PRODUCTS)
-    maxProducts?: number;
-
-    /**
      * Gets the effective GCS key (supporting both new and deprecated field names).
      */
     get effectiveGcsKey(): string | undefined {
@@ -107,12 +102,21 @@ export interface VirtualStagingQuotaDto {
     remaining: number;
 }
 
+/** Product from the catalog used as the visual reference for a generation. */
+export interface VirtualStagingProductDto {
+    id: string;
+    title: string;
+    description: string | null;
+    price: number;
+    imageUrl: string;
+}
+
 /**
  * Response DTO from virtual staging endpoint.
  *
  * Contains the complete result of the staging operation including:
  * - AI analysis of the original room
- * - Suggested products from the catalog
+ * - Product selected from the catalog
  * - URL of the generated staged image
  * - Processing metadata for monitoring
  */
@@ -123,11 +127,8 @@ export interface VirtualStagingResponseDto {
      */
     analysis: RoomAnalysisResult;
 
-    /**
-     * Products from the catalog that match the staging.
-     * Filtered to products with valid image URLs for visual reference.
-     */
-    suggestedProducts: HybridProductResult[];
+    /** Product explicitly selected by the user and used for this staging. */
+    selectedProduct: VirtualStagingProductDto;
 
     /**
      * Public URL of the generated staged image.

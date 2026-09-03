@@ -10,7 +10,7 @@ import {
 
 /**
  * Controller for virtual staging endpoints.
- * Receives image reference (key or url) and returns staged results.
+ * Receives an image reference and the selected catalog product, then returns the staged result.
  */
 @Controller('ai/virtual-staging')
 @UseGuards(JwtAuthGuard)
@@ -27,17 +27,17 @@ export class VirtualStagingController {
     /**
      * POST /ai/virtual-staging
      * 
-     * Process a room image and receive a staged version with product suggestions.
+     * Process a room image with the catalog product selected by the user.
      * 
-     * @param dto - Request with imageKey (internal) or imageUrl (external)
-     * @returns Staged image URL and suggested products
+     * @param dto - Request with productId and imageKey (internal) or imageUrl (external)
+     * @returns Staged image URL and the product used as visual reference
      * 
      * @example
      * 
-     * { "imageKey": "virtual-staging/temp/123.jpg" }
+     * { "imageKey": "virtual-staging/temp/123.jpg", "productId": "2ebbb0f8-6ef5-4bcb-9fcb-7e4afb1b418a" }
      * 
      * 
-     * { "imageUrl": "https://example.com/room.jpg" }
+     * { "imageUrl": "https://example.com/room.jpg", "productId": "2ebbb0f8-6ef5-4bcb-9fcb-7e4afb1b418a" }
      */
     @Post()
     async stageRoom(
