@@ -13,16 +13,16 @@ import type { IVisionProvider, RoomAnalysisResult } from '../../interfaces/visio
 import { VISION_PROVIDER } from '../../interfaces/vision-provider.interface';
 import type { IImageGenerator } from '../../interfaces/image-generator.interface';
 import { IMAGE_GENERATOR } from '../../interfaces/image-generator.interface';
-import { SearchService } from '../search/search.service';
-import type { HybridProductResult } from '../../interfaces/search-result.interface';
 import type {
     VirtualStagingQuotaDto,
+    VirtualStagingProductDto,
     VirtualStagingResponseDto,
     VirtualStagingRequestDto,
 } from '../../dto/virtual-staging.dto';
 import { buildStagingPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
-import { VIRTUAL_STAGING } from '../../constants';
 import { User } from '../../../users/entities/user.entity';
+import { Product } from '../../../products/entities/product.entity';
+import { AssetType } from '../../../products/enums/asset-type.enum';
 
 const DAILY_VIRTUAL_STAGING_LIMIT = 10;
 const QUOTA_TIME_ZONE = 'America/La_Paz';
@@ -36,7 +36,7 @@ interface QuotaRow {
  *
  * Orchestrates the complete virtual staging workflow:
  * 1. Room Analysis - Uses vision AI to analyze the room image
- * 2. Product Matching - Finds relevant products from catalog
+ * 2. Product Resolution - Loads the catalog product selected by the user
  * 3. Image Generation - Creates staged room with products
  *
  * Uses Ports & Adapters pattern for AI provider flexibility.
@@ -52,10 +52,11 @@ export class VirtualStagingService {
         @Inject(IMAGE_GENERATOR)
         private readonly imageGenerator: IImageGenerator,
 
-        private readonly searchService: SearchService,
-
         @InjectRepository(User)
         private readonly userRepository: Repository<User>,
+
+        @InjectRepository(Product)
+        private readonly productRepository: Repository<Product>,
     ) { }
 
     /**
@@ -85,10 +86,10 @@ export class VirtualStagingService {
     }
 
     /**
-     * Generates a staged room image with product recommendations.
+     * Generates a staged room image with the catalog product selected by the user.
      *
      * @param dto - Request with image source and preferences
-     * @returns Staged image URL, room analysis, and product suggestions
+     * @returns Staged image URL, room analysis, and selected product
      * @throws BadRequestException if no image source is provided
      */
     async generateStagedRoom(
@@ -98,35 +99,29 @@ export class VirtualStagingService {
         const startTime = Date.now();
 
         this.validateImageSource(dto);
+        const selectedProduct = await this.resolveSelectedProduct(dto.productId);
         const quota = await this.reserveQuota(userId);
 
         try {
             this.logger.log(`Starting virtual staging...`);
 
-            // 1. Analyze room and find matching products
+            // 1. Analyze the room while preserving the user's product choice
             const analysis = await this.analyzeRoomWithUrlFallback(dto);
             if (dto.preferredStyle) analysis.style = dto.preferredStyle;
 
-            const maxProducts = dto.maxProducts ?? VIRTUAL_STAGING.DEFAULT_MAX_PRODUCTS;
-            const allProducts = await this.findMatchingProducts(analysis, maxProducts);
-
-            // 2. Filter to products with valid image URLs for visual reference
-            const visualProducts = this.filterVisualProducts(allProducts);
-            this.logger.debug(`Selected ${visualProducts.length} products for visual reference`);
-
-            // 3. Generate staged image using prompt builder
-            const prompt = this.buildPromptForStaging(analysis, visualProducts);
-            const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, visualProducts);
+            // 2. Generate the staged image using only the explicitly selected product
+            const prompt = this.buildPromptForStaging(analysis, selectedProduct);
+            const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, selectedProduct);
 
             const processingTimeMs = Date.now() - startTime;
             this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
 
             return {
                 analysis,
-                suggestedProducts: visualProducts,
+                selectedProduct,
                 stagedImageUrl: generatedImage.imageUrl,
                 quota,
-                metadata: { processingTimeMs, productsFound: visualProducts.length },
+                metadata: { processingTimeMs, productsFound: 1 },
             };
         } catch (error) {
             await this.refundQuotaSafely(userId);
@@ -239,13 +234,37 @@ export class VirtualStagingService {
         return dto.externalImageUrl ?? dto.imageUrl;
     }
 
-    /**
-     * Filters products to only those with valid HTTP/HTTPS image URLs.
-     */
-    private filterVisualProducts(products: HybridProductResult[]): HybridProductResult[] {
-        return products
-            .filter(p => p.imageUrl && (p.imageUrl.startsWith('http://') || p.imageUrl.startsWith('https://')))
-            .slice(0, VIRTUAL_STAGING.MAX_REFERENCE_IMAGES);
+    /** Loads the selected product and resolves the image used as the AI reference. */
+    private async resolveSelectedProduct(productId: string): Promise<VirtualStagingProductDto> {
+        const product = await this.productRepository.findOne({
+            where: { id: productId },
+            relations: ['assets'],
+        });
+
+        if (!product) {
+            throw new NotFoundException('El producto seleccionado ya no está disponible.');
+        }
+
+        const imageAssets = (product.assets ?? []).filter(
+            asset => asset.type === AssetType.IMAGE && this.isSupportedReferenceUrl(asset.url),
+        );
+        const referenceImage = imageAssets.find(asset => asset.isPrimary) ?? imageAssets[0];
+
+        if (!referenceImage) {
+            throw new BadRequestException('El producto seleccionado no tiene una imagen disponible para la generación.');
+        }
+
+        return {
+            id: product.id,
+            title: product.title,
+            description: product.description,
+            price: Number(product.price),
+            imageUrl: referenceImage.url,
+        };
+    }
+
+    private isSupportedReferenceUrl(url: string): boolean {
+        return url.startsWith('http://') || url.startsWith('https://');
     }
 
     /**
@@ -253,12 +272,12 @@ export class VirtualStagingService {
      */
     private buildPromptForStaging(
         analysis: RoomAnalysisResult,
-        products: HybridProductResult[],
+        product: VirtualStagingProductDto,
     ): string {
         return buildStagingPrompt({
             analysis,
-            products: products.map((p, index) => ({ title: p.title, index })),
-            hasReferenceImages: products.length > 0,
+            products: [{ title: product.title, index: 0 }],
+            hasReferenceImages: true,
         });
     }
 
@@ -291,17 +310,16 @@ export class VirtualStagingService {
     private async generateImageWithUrlFallback(
         dto: VirtualStagingRequestDto,
         prompt: string,
-        visualProducts: HybridProductResult[],
+        product: VirtualStagingProductDto,
     ) {
         const gcsKey = this.getGcsKey(dto);
         const externalUrl = this.getExternalUrl(dto);
 
-        const referenceImages: string[] = visualProducts.map(p => p.imageUrl as string);
         const baseRequest = {
             prompt,
             style: 'photorealistic' as const,
             negativePrompt: STAGING_GENERATION_CONFIG.defaultNegativePrompt,
-            referenceImages,
+            referenceImages: [product.imageUrl],
         };
 
         if (gcsKey) {
@@ -314,50 +332,4 @@ export class VirtualStagingService {
         return await this.imageGenerator.generate({ ...baseRequest, imageSource: { url: externalUrl } });
     }
 
-    /**
-     * Finds products matching the room analysis.
-     */
-    private async findMatchingProducts(
-        analysis: RoomAnalysisResult,
-        maxProducts: number,
-    ): Promise<HybridProductResult[]> {
-        const queries = this.buildSearchQueries(analysis);
-        const searchResults = await Promise.all(
-            queries.map(query => this.searchService.searchHybrid({ query, limit: VIRTUAL_STAGING.SEARCH_RESULTS_PER_QUERY })),
-        );
-        return this.mergeAndRankProducts(searchResults, maxProducts);
-    }
-
-    /**
-     * Builds search queries from room analysis.
-     * Combines furniture type with style and primary color.
-     */
-    private buildSearchQueries(analysis: RoomAnalysisResult): string[] {
-        const { suggestedFurniture, style, colorPalette } = analysis;
-        const primaryColor = colorPalette[0] || '';
-        return suggestedFurniture
-            .slice(0, VIRTUAL_STAGING.MAX_FURNITURE_QUERIES)
-            .map(furniture => `${furniture} ${style} ${primaryColor}`.trim());
-    }
-
-    /**
-     * Merges and ranks products from multiple search results.
-     * Removes duplicates and sorts by score.
-     */
-    private mergeAndRankProducts(
-        searchResults: Array<{ results: HybridProductResult[] }>,
-        maxProducts: number,
-    ): HybridProductResult[] {
-        const seen = new Set<string>();
-        const merged: HybridProductResult[] = [];
-        for (const result of searchResults) {
-            for (const product of result.results) {
-                if (!seen.has(product.id)) {
-                    seen.add(product.id);
-                    merged.push(product);
-                }
-            }
-        }
-        return merged.sort((a, b) => b.score - a.score).slice(0, maxProducts);
-    }
 }
