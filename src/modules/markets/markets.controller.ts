@@ -18,4 +18,12 @@ export class MarketsController {
   ) {
     return this.marketsService.resolveContext(dto, headers);
   }
+
+  @Get('bootstrap')
+  bootstrap(
+    @Query() dto: StorefrontContextDto,
+    @Headers() headers: Record<string, string | string[] | undefined>,
+  ) {
+    return this.marketsService.storefrontBootstrap(dto, headers);
+  }
 }
