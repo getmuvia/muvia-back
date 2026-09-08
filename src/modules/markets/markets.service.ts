@@ -30,6 +30,22 @@ export class MarketsService {
 
   async resolveContext(dto: StorefrontContextDto, headers: CountryHeaders) {
     const activeMarkets = await this.findActive();
+    return this.buildContext(activeMarkets, dto, headers);
+  }
+
+  async storefrontBootstrap(dto: StorefrontContextDto, headers: CountryHeaders) {
+    const markets = await this.findActive();
+    return {
+      markets,
+      context: this.buildContext(markets, dto, headers),
+    };
+  }
+
+  private buildContext(
+    activeMarkets: Market[],
+    dto: StorefrontContextDto,
+    headers: CountryHeaders,
+  ) {
     if (!activeMarkets.length) throw new NotFoundException('No storefront markets are available');
 
     const explicitCode = dto.countryCode?.toUpperCase();
