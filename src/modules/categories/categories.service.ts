@@ -34,6 +34,24 @@ export class CategoriesService {
     });
   }
 
+  async findSelectable(locale = 'es-BO'): Promise<Category[]> {
+    const categories = await this.categoryRepository.find({
+      where: { isSelectable: true },
+      relations: ['translations', 'parent'],
+      order: { name: 'ASC' },
+    });
+    const normalizedLocale = locale.replace('_', '-').toLowerCase();
+    const language = normalizedLocale.split('-')[0];
+    return categories.map(category => {
+      const translation = category.translations.find(item =>
+        item.locale.toLowerCase() === normalizedLocale,
+      ) ?? category.translations.find(item =>
+        item.locale.toLowerCase().split('-')[0] === language,
+      );
+      return Object.assign(category, { name: translation?.name ?? category.name });
+    });
+  }
+
   async findRootCategories(): Promise<Category[]> {
     return this.categoryRepository.find({
       where: { parentId: IsNull() },

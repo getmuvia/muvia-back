@@ -10,6 +10,7 @@ import {
 import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { ProductAsset } from './product-asset.entity';
+import { ProductListing } from './product-listing.entity';
 
 export interface ProductSpecifications {
     weight?: string;
@@ -76,4 +77,7 @@ export class Product {
 
     @OneToMany(() => ProductAsset, (asset) => asset.product, { cascade: true })
     assets: ProductAsset[];
+
+    @OneToMany(() => ProductListing, (listing) => listing.product, { cascade: true })
+    listings: ProductListing[];
 }

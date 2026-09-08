@@ -15,6 +15,9 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { PasswordService } from '../../common/services/password.service';
 import { UserRole } from './interfaces/user-role';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
+import { VendorLocation } from './entities/vendor-location.entity';
+import { MarketsService } from '../markets/markets.service';
+import { VendorLocationDto } from './dto/create-vendor-profile.dto';
 
 @Injectable()
 export class UsersService {
@@ -23,7 +26,10 @@ export class UsersService {
     private readonly userRepository: Repository<User>,
     @InjectRepository(VendorProfile)
     private readonly vendorProfileRepository: Repository<VendorProfile>,
+    @InjectRepository(VendorLocation)
+    private readonly vendorLocationRepository: Repository<VendorLocation>,
     private readonly passwordService: PasswordService,
+    private readonly marketsService: MarketsService,
   ) { }
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -94,14 +100,14 @@ export class UsersService {
     return this.userRepository.findOne({
       where: { email },
       select: ['id', 'email', 'passwordHash', 'role'],
-      relations: ['vendorProfile'],
+      relations: ['vendorProfile', 'vendorProfile.locations'],
     });
   }
 
   async findOne(id: string): Promise<User> {
     const user = await this.userRepository.findOne({
       where: { id },
-      relations: ['vendorProfile'],
+      relations: ['vendorProfile', 'vendorProfile.locations'],
     });
 
     if (!user) {
@@ -113,7 +119,7 @@ export class UsersService {
 
   async findAll(): Promise<User[]> {
     return this.userRepository.find({
-      relations: ['vendorProfile'],
+      relations: ['vendorProfile', 'vendorProfile.locations'],
     });
   }
 
@@ -142,12 +148,15 @@ export class UsersService {
     this.userRepository.merge(user, userData);
 
     if (vendorProfile && this.isVendor(user.role)) {
+      const { location, ...profileData } = vendorProfile;
       if (!user.vendorProfile) {
-
-        user.vendorProfile = this.vendorProfileRepository.create({ userId: user.id, ...vendorProfile });
+        user.vendorProfile = this.vendorProfileRepository.create({ userId: user.id, ...profileData });
       } else {
-        this.vendorProfileRepository.merge(user.vendorProfile, vendorProfile);
+        this.vendorProfileRepository.merge(user.vendorProfile, profileData);
       }
+      await this.userRepository.save(user);
+      await this.upsertPrimaryLocation(user.vendorProfile, location);
+      return this.findOne(id);
     }
 
     await this.userRepository.save(user);
@@ -203,19 +212,45 @@ export class UsersService {
     userId: string,
     profileData: CreateUserDto['vendorProfile'],
   ): Promise<VendorProfile> {
+    const { location, ...data } = profileData!;
     const vendorProfile = this.vendorProfileRepository.create({
       userId,
-      ...profileData,
+      ...data,
     });
-    return this.vendorProfileRepository.save(vendorProfile);
+    const savedProfile = await this.vendorProfileRepository.save(vendorProfile);
+    await this.upsertPrimaryLocation(savedProfile, location);
+    return savedProfile;
   }
 
-  private async updateVendorProfile(
-    userId: string,
-    profileData: UpdateUserDto['vendorProfile'],
+  private async upsertPrimaryLocation(
+    profile: VendorProfile,
+    location?: VendorLocationDto,
   ): Promise<void> {
-    if (profileData) {
-      await this.vendorProfileRepository.update({ userId }, profileData);
+    const activeMarkets = await this.marketsService.findActive();
+    const defaultMarket = activeMarkets.find(market => market.isDefault) ?? activeMarkets[0];
+    const countryCode = location?.countryCode?.toUpperCase() ?? defaultMarket?.code;
+    if (!countryCode) throw new BadRequestException('No active market is available for the vendor location');
+    await this.marketsService.requireActive(countryCode);
+
+    const existing = await this.vendorLocationRepository.findOne({
+      where: { vendorProfileId: profile.id, isPrimary: true },
+    });
+    const values = {
+      label: 'Principal',
+      countryCode,
+      region: location?.region ?? null,
+      city: location?.city ?? null,
+      isPrimary: true,
+    };
+    if (existing) {
+      this.vendorLocationRepository.merge(existing, values);
+      await this.vendorLocationRepository.save(existing);
+      return;
     }
+    await this.vendorLocationRepository.save(this.vendorLocationRepository.create({
+      ...values,
+      vendorProfileId: profile.id,
+    }));
   }
+
 }

@@ -1,7 +1,14 @@
 import { IsOptional, IsString, IsNumber, IsUUID, IsArray, Min, Max } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
+import { Matches } from 'class-validator';
 
 export class ProductFilterDto {
+    @IsString()
+    @Matches(/^[A-Z]{2}$/)
+    @Transform(({ value }) => typeof value === 'string' ? value.trim().toUpperCase() : value)
+    @IsOptional()
+    marketCode?: string = 'BO';
+
     @IsString()
     @IsOptional()
     search?: string;

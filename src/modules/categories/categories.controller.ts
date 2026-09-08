@@ -39,6 +39,11 @@ export class CategoriesController {
     return this.categoriesService.findRootCategories();
   }
 
+  @Get('selectable')
+  findSelectable(@Query('locale') locale?: string) {
+    return this.categoriesService.findSelectable(locale);
+  }
+
   @Get('level/:level')
   findByLevel(@Param('level') level: string) {
     return this.categoriesService.findByLevel(parseInt(level, 10));

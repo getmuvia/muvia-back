@@ -1,12 +1,14 @@
 import {
     IsString,
     MinLength,
+    MaxLength,
     IsOptional,
     IsNumber,
     Min,
     Max,
+    Matches,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { VALIDATION, SEARCH } from '../constants';
 
 /**
@@ -22,6 +24,17 @@ import { VALIDATION, SEARCH } from '../constants';
  * }
  */
 export class HybridSearchDto {
+    @IsString()
+    @Matches(/^[A-Z]{2}$/)
+    @Transform(({ value }) => typeof value === 'string' ? value.trim().toUpperCase() : value)
+    @IsOptional()
+    marketCode?: string = 'BO';
+
+    @IsString()
+    @MaxLength(35)
+    @IsOptional()
+    locale?: string = 'es-BO';
+
     /**
      * Search query text in natural language.
      * Will be used for both semantic embedding and lexical matching.
@@ -30,7 +43,9 @@ export class HybridSearchDto {
      * @minLength 2
      */
     @IsString()
+    @Transform(({ value }) => typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value)
     @MinLength(VALIDATION.MIN_QUERY_LENGTH)
+    @MaxLength(200)
     query: string;
 
     /**
