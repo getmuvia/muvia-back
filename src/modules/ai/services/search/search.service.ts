@@ -12,6 +12,10 @@ import {
 } from '../../interfaces/search-result.interface';
 import { Product } from '../../../products/entities/product.entity';
 import { SEARCH } from '../../constants';
+import { evaluateProduct, SearchIntent } from './search-intent';
+import type { SearchableProduct } from './search-intent';
+import { CategoryTaxonomyService } from '../../../categories/category-taxonomy.service';
+import { MarketsService } from '../../../markets/markets.service';
 
 /**
  * Orchestrates semantic and hybrid search operations.
@@ -25,6 +29,8 @@ export class SearchService {
         private readonly vectorService: VectorService,
         private readonly productVectorRepo: ProductVectorRepository,
         private readonly productLexicalRepo: ProductLexicalRepository,
+        private readonly categoryTaxonomyService: CategoryTaxonomyService,
+        private readonly marketsService: MarketsService,
     ) { }
 
     /**
@@ -32,26 +38,22 @@ export class SearchService {
      * Uses a fetch multiplier to ensure the best results aren't missed.
      */
     async searchHybrid(dto: HybridSearchDto): Promise<HybridSearchResponse> {
-        const { query, limit = SEARCH.DEFAULT_LIMIT } = dto;
+        const { query, limit = SEARCH.DEFAULT_LIMIT, marketCode = 'BO', locale = 'es-BO' } = dto;
+        await this.marketsService.requireActive(marketCode);
+        const intent = await this.categoryTaxonomyService.createSearchIntent(query, locale);
+        if (!intent.terms.length) return { query, results: [], relatedResults: [], count: 0 };
         const fetchLimit = limit * SEARCH.FETCH_MULTIPLIER;
-
-        // Execute BOTH searches in PARALLEL
         const [semanticResults, lexicalResults] = await Promise.all([
-            this.performSemanticSearch(query, fetchLimit),
-            this.performLexicalSearch(query, fetchLimit),
+            this.performSemanticSearch(intent.text, fetchLimit, marketCode),
+            this.productLexicalRepo.search(intent, fetchLimit, marketCode),
         ]);
-
-        // Merge and rank results
-        const merged = this.mergeResults(semanticResults, lexicalResults, query);
-
-        this.logger.debug(
-            `Hybrid search "${query}": ${semanticResults.length} semantic, ${lexicalResults.length} lexical, ${merged.length} merged`,
-        );
-
+        const { results, relatedResults } = this.mergeResults(semanticResults, lexicalResults, intent);
+        const selected = results.slice(0, limit);
         return {
             query,
-            results: merged.slice(0, limit),
-            count: merged.length,
+            results: selected,
+            count: selected.length,
+            relatedResults: relatedResults.slice(0, Math.min(limit, SEARCH.RELATED_LIMIT)),
         };
     }
 
@@ -59,7 +61,11 @@ export class SearchService {
      * Performs semantic search using vector embeddings.
      * Gracefully returns empty array if VectorService is unavailable.
      */
-    private async performSemanticSearch(query: string, limit: number): Promise<SearchProductResult[]> {
+    private async performSemanticSearch(
+        query: string,
+        limit: number,
+        marketCode: string,
+    ): Promise<SearchProductResult[]> {
         if (!this.vectorService.isAvailable()) {
             this.logger.warn('VectorService unavailable, skipping semantic search');
             return [];
@@ -67,22 +73,14 @@ export class SearchService {
 
         try {
             const embedding = await this.createQueryEmbedding(query);
-            return this.productVectorRepo.findBySimilarity(embedding, limit, SEARCH.DEFAULT_SIMILARITY_THRESHOLD);
+            return await this.productVectorRepo.findBySimilarity(
+                embedding,
+                limit,
+                SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
+                marketCode,
+            );
         } catch (error) {
             this.logger.error(`Semantic search failed: ${error.message}`);
-            return [];
-        }
-    }
-
-    /**
-     * Performs lexical search (ILIKE on title/description).
-     * Implemented inside AI module to avoid a circular dependency with ProductsModule.
-     */
-    private async performLexicalSearch(query: string, limit: number): Promise<Product[]> {
-        try {
-            return await this.productLexicalRepo.search(query, limit);
-        } catch (error) {
-            this.logger.error(`Lexical search failed: ${error.message}`);
             return [];
         }
     }
@@ -90,104 +88,72 @@ export class SearchService {
     private mergeResults(
         semantic: SearchProductResult[],
         lexical: Product[],
-        query: string,
-    ): HybridProductResult[] {
-        const scoreMap = new Map<string, HybridProductResult>();
-
-        semantic.forEach(p => {
-            scoreMap.set(p.id, {
-                id: p.id,
-                title: p.title,
-                description: p.description,
-                price: Number(p.price),
-                imageUrl: p.imageUrl,
-                score: p.similarity,
-                matchType: 'semantic',
+        intent: SearchIntent,
+    ): { results: HybridProductResult[]; relatedResults: HybridProductResult[] } {
+        const candidates = new Map<string, {
+            product: SearchableProduct;
+            result: HybridProductResult;
+            similarity?: number;
+        }>();
+        for (const product of semantic) {
+            candidates.set(product.id, {
+                product,
+                similarity: product.similarity,
+                result: {
+                    id: product.id,
+                    title: product.title,
+                    description: product.description,
+                    price: Number(product.price),
+                    currencyCode: product.currencyCode,
+                    imageUrl: product.imageUrl,
+                    score: product.similarity,
+                    matchType: 'semantic',
+                },
             });
-        });
-
-        lexical.forEach(p => {
-            const primaryAsset = p.assets?.find(a => a.isPrimary);
-            const existing = scoreMap.get(p.id);
-            const lexicalScore = this.calculateLexicalScore(p, query);
-
+        }
+        for (const product of lexical) {
+            const existing = candidates.get(product.id);
             if (existing) {
-                existing.score = Math.min(existing.score + SEARCH.SCORE_BOOSTS.HYBRID_MATCH, 1.0);
-                existing.matchType = 'hybrid';
-            } else {
-                scoreMap.set(p.id, {
-                    id: p.id,
-                    title: p.title,
-                    description: p.description,
-                    price: Number(p.price),
-                    imageUrl: primaryAsset?.url ?? null,
-                    score: lexicalScore,
-                    matchType: 'lexical',
-                });
+                existing.product = product;
+                existing.result.matchType = 'hybrid';
+                continue;
             }
-        });
-
-        return Array.from(scoreMap.values())
-            .sort((a, b) => b.score - a.score);
-    }
-
-/**
-     * Calculates a lexical score (0.0 - 1.0) based on text matching quality.
-     * * Scoring Algorithm:
-     * - Exact Title Match: 1.0 (Immediate return)
-     * - Keyword Density: Weighted (65% Title, 35% Description) using regex boundaries.
-     * - Smart Boosters:
-     * 1. Global Completeness (+0.2): All query words are present (split across title/desc).
-     * 2. Phrase Match (+0.1): Exact phrase found in description.
-     * 3. Partial Title (+0.15): Title contains the query as a continuous substring.
-     * * @param product - The product to evaluate.
-     * @param query - The search text from the user.
-     * @returns Normalized score capped at 1.0 (Returns 0 if no keywords match).
-     */
-    private calculateLexicalScore(product: Product, query: string): number {
-        const cleanQuery = query.toLowerCase().trim();
-        const queryWords = cleanQuery.split(/\s+/).filter(w => w.length > 2);
-
-        if (queryWords.length === 0) return 0;
-
-        const lowerTitle = product.title.toLowerCase();
-        const lowerDesc = product.description?.toLowerCase() ?? '';
-
-        if (lowerTitle === cleanQuery) return 1.0;
-
-        const uniqueQueryWords = [...new Set(queryWords)];
-        const wordsFoundInTitle = new Set<string>();
-        const wordsFoundInDesc = new Set<string>();
-
-        uniqueQueryWords.forEach(word => {
-            const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const regex = new RegExp(`\\b${escapedWord}\\b`, 'i');
-
-            if (regex.test(lowerTitle)) wordsFoundInTitle.add(word);
-            if (regex.test(lowerDesc)) wordsFoundInDesc.add(word);
-        });
-
-        const titleScore = (wordsFoundInTitle.size / uniqueQueryWords.length) * SEARCH.LEXICAL_WEIGHTS.TITLE;
-        const descScore = (wordsFoundInDesc.size / uniqueQueryWords.length) * SEARCH.LEXICAL_WEIGHTS.DESCRIPTION;
-
-        let totalScore = titleScore + descScore;
-
-        const allWordsFound = uniqueQueryWords.every(w =>
-            wordsFoundInTitle.has(w) || wordsFoundInDesc.has(w)
-        );
-        if (allWordsFound) {
-            totalScore += SEARCH.SCORE_BOOSTS.ALL_WORDS_FOUND;
+            const primaryAsset = product.assets?.find(asset => asset.isPrimary && asset.type === 'image')
+                ?? product.assets?.find(asset => asset.type === 'image');
+            const listing = product.listings?.[0];
+            candidates.set(product.id, {
+                product: { ...product, categoryCode: product.category?.code },
+                result: {
+                    id: product.id,
+                    title: product.title,
+                    description: product.description,
+                    price: Number(listing?.price ?? product.price),
+                    currencyCode: listing?.currencyCode ?? 'BOB',
+                    imageUrl: primaryAsset?.url ?? null,
+                    score: 0,
+                    matchType: 'lexical',
+                },
+            });
         }
 
-        if (lowerDesc.includes(cleanQuery)) {
-            totalScore += SEARCH.SCORE_BOOSTS.PHRASE_IN_DESCRIPTION;
+        const results: HybridProductResult[] = [];
+        const relatedResults: HybridProductResult[] = [];
+        for (const { product, result, similarity } of candidates.values()) {
+            const relevance = evaluateProduct(product, intent);
+            if (relevance.primary) {
+                // Identity/text determines eligibility; AI contributes only to ordering.
+                result.score = similarity === undefined ? relevance.score
+                    : relevance.score * (1 - SEARCH.SEMANTIC_RANK_WEIGHT)
+                        + similarity * SEARCH.SEMANTIC_RANK_WEIGHT;
+                results.push(result);
+            } else if (relevance.relatedType && similarity !== undefined
+                && similarity >= SEARCH.RELATED_SIMILARITY_THRESHOLD) {
+                relatedResults.push(result);
+            }
         }
-
-        if (lowerTitle.includes(cleanQuery)) {
-            totalScore += SEARCH.SCORE_BOOSTS.PARTIAL_TITLE_MATCH;
-        }
-
-        return Math.min(parseFloat(totalScore.toFixed(2)), 1.0);
+        const rank = (a: HybridProductResult, b: HybridProductResult) =>
+            b.score - a.score || a.title.localeCompare(b.title, 'es') || a.id.localeCompare(b.id);
+        return { results: results.sort(rank), relatedResults: relatedResults.sort(rank) };
     }
 
     /**

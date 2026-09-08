@@ -25,10 +25,11 @@ export class ProductVectorRepository {
         embedding: string,
         limit: number,
         threshold: number,
+        marketCode = 'BO',
     ): Promise<SearchProductResult[]> {
         const raw = await this.repository.query(
             this.getSimilarityQuery(),
-            [embedding, threshold, limit],
+            [embedding, threshold, marketCode, limit],
         );
 
         return this.mapToResults(raw);
@@ -69,10 +70,13 @@ export class ProductVectorRepository {
                 p.id,
                 p.title,
                 p.description,
-                p.price,
-                p.stock,
+                p.keywords,
+                listing.price,
+                listing.stock,
+                listing.currency_code as "currencyCode",
                 p.seller_id as "sellerId",
                 p.category_id as "categoryId",
+                category.code as "categoryCode",
                 p."createdAt",
                 1 - (p.embedding <=> $1::vector) as similarity,
                 (
@@ -82,10 +86,13 @@ export class ProductVectorRepository {
                     LIMIT 1
                 ) as "imageUrl"
             FROM products p
+            INNER JOIN product_listings listing ON listing.product_id = p.id
+              AND listing.market_code = $3 AND listing.is_active = true
+            LEFT JOIN categories category ON category.id = p.category_id
             WHERE p.embedding IS NOT NULL
                 AND 1 - (p.embedding <=> $1::vector) >= $2
             ORDER BY p.embedding <=> $1::vector ASC
-            LIMIT $3
+            LIMIT $4
         `;
     }
 

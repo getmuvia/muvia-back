@@ -14,6 +14,9 @@ export interface SearchProductResult {
     /** Product description */
     description: string | null;
 
+    /** Search tags used to validate product identity. */
+    keywords: string[];
+
     /** Product price */
     price: number;
 
@@ -25,6 +28,12 @@ export interface SearchProductResult {
 
     /** Category ID */
     categoryId: string | null;
+
+    /** Stable category identity used for relevance filtering */
+    categoryCode: string | null;
+
+    /** Currency for the selected market listing */
+    currencyCode: string;
 
     /** Primary product image URL */
     imageUrl: string | null;
@@ -67,6 +76,9 @@ export interface HybridProductResult {
     /** Product price */
     price: number;
 
+    /** Currency for the selected market listing */
+    currencyCode: string;
+
     /** Primary product image URL */
     imageUrl: string | null;
 
@@ -77,7 +89,7 @@ export interface HybridProductResult {
      * How the product was matched:
      * - semantic: Found via vector similarity only
      * - lexical: Found via text matching only
-     * - hybrid: Found via both methods (highest confidence)
+     * - hybrid: Retrieved by both methods; eligibility is evaluated separately
      */
     matchType: 'semantic' | 'lexical' | 'hybrid';
 }
@@ -89,9 +101,12 @@ export interface HybridSearchResponse {
     /** Original search query */
     query: string;
 
-    /** Matching products sorted by combined score */
+    /** Products that satisfy the requested identity/text, sorted by relevance. */
     results: HybridProductResult[];
 
-    /** Total number of unique results found */
+    /** Number of main results returned (excludes related suggestions). */
     count: number;
+
+    /** Broader suggestions, never mixed into main results. */
+    relatedResults: HybridProductResult[];
 }

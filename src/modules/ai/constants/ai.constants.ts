@@ -46,19 +46,12 @@ export const SEARCH = {
     /** Minimum similarity threshold for semantic search */
     DEFAULT_SIMILARITY_THRESHOLD: 0.3,
 
-    /** Weights for lexical scoring */
-    LEXICAL_WEIGHTS: {
-        TITLE: 0.65,
-        DESCRIPTION: 0.35,
-    },
+    /** Suggestions also require a compatible type for explicit product queries. */
+    RELATED_SIMILARITY_THRESHOLD: 0.45,
+    RELATED_LIMIT: 6,
 
-    /** Score boosts for matching patterns */
-    SCORE_BOOSTS: {
-        ALL_WORDS_FOUND: 0.2,
-        PHRASE_IN_DESCRIPTION: 0.1,
-        PARTIAL_TITLE_MATCH: 0.15,
-        HYBRID_MATCH: 0.3,
-    },
+    /** Semantic evidence ranks eligible products; it cannot establish their type. */
+    SEMANTIC_RANK_WEIGHT: 0.25,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -32,6 +32,8 @@ import { Vertex3DProvider } from './providers/google/vertex-3d.provider';
 import { Scan3dService } from './services/scan-3d/scan-3d.service';
 import { Scan3dController } from './controllers/scan-3d.controller';
 import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } from './providers/google';
+import { CategoriesModule } from '../categories/categories.module';
+import { MarketsModule } from '../markets/markets.module';
 
 /**
  * AI Module - Semantic search, embeddings, and virtual staging.
@@ -49,6 +51,8 @@ import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } f
 @Module({
     imports: [
         TypeOrmModule.forFeature([Product, User]),
+        CategoriesModule,
+        MarketsModule,
     ],
 
     controllers: [

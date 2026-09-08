@@ -3,9 +3,11 @@ import {
   PrimaryGeneratedColumn,
   Column,
   OneToOne,
+  OneToMany,
   JoinColumn,
 } from 'typeorm';
 import { User } from './user.entity';
+import { VendorLocation } from './vendor-location.entity';
 
 import { BusinessHoursDto } from '../dto/create-vendor-profile.dto';
 
@@ -50,4 +52,7 @@ export class VendorProfile {
   @OneToOne(() => User, (user) => user.vendorProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;
+
+  @OneToMany(() => VendorLocation, (location) => location.vendorProfile, { cascade: true })
+  locations: VendorLocation[];
 }

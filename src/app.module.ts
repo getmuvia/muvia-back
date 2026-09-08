@@ -14,6 +14,7 @@ import { envValidationSchema } from './config/env.validation';
 import { CommonModule } from './common/common.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AiModule } from './modules/ai/ai.module';
+import { MarketsModule } from './modules/markets/markets.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AiModule } from './modules/ai/ai.module';
     CategoriesModule,
     FilesModule,
     AiModule,
+    MarketsModule,
   ],
   controllers: [AppController],
   providers: [
