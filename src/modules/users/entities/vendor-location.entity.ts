@@ -10,16 +10,16 @@ export class VendorLocation {
   @Column({ name: 'vendor_profile_id' })
   vendorProfileId: string;
 
-  @Column({ length: 80, nullable: true })
+  @Column({ type: 'varchar', length: 80, nullable: true })
   label: string | null;
 
   @Column({ name: 'country_code', type: 'char', length: 2 })
   countryCode: string;
 
-  @Column({ length: 120, nullable: true })
+  @Column({ type: 'varchar', length: 120, nullable: true })
   region: string | null;
 
-  @Column({ length: 120, nullable: true })
+  @Column({ type: 'varchar', length: 120, nullable: true })
   city: string | null;
 
   @Column({ name: 'is_primary', default: false })

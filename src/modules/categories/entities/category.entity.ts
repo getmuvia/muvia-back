@@ -16,7 +16,7 @@ export class Category {
     @PrimaryGeneratedColumn('uuid')
     id: string;
 
-    @Column({ name: 'parent_id', nullable: true })
+    @Column({ name: 'parent_id', type: 'uuid', nullable: true })
     parentId: string | null;
 
     @Column()
