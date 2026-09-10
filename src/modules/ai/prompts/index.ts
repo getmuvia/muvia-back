@@ -15,13 +15,6 @@ export { ROOM_ANALYSIS_PROMPT, type RoomAnalysisPromptConfig } from './templates
 // Staging Generation
 export {
     buildStagingPrompt,
-    buildSimpleStagingPrompt,
     STAGING_GENERATION_CONFIG,
     type StagingPromptContext,
 } from './templates/staging-generation.prompt';
-
-// Generic Image Generation
-export {
-    buildImageGenerationPrompt,
-    IMAGE_GENERATION_CONFIG,
-} from './templates/image-generation.prompt';

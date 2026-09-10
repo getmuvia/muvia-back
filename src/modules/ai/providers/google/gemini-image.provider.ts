@@ -9,7 +9,7 @@ import {
     ImageGenerationResult,
 } from '../../interfaces/image-generator.interface';
 import { RetryService, ImageResolverService } from '../../core';
-import { IMAGE_GENERATION_CONFIG } from '../../prompts';
+import { STAGING_GENERATION_CONFIG } from '../../prompts';
 import { getImageDimensions, mapToSupportedAspectRatio } from '../helpers';
 
 @Injectable()
@@ -60,7 +60,7 @@ export class GeminiImageProvider implements IImageGenerator {
                     contents: contentParts,
                     config: {
                         responseModalities: ['IMAGE'],
-                        temperature: IMAGE_GENERATION_CONFIG.generationConfig.temperature,
+                        temperature: STAGING_GENERATION_CONFIG.generationConfig.temperature,
                         imageConfig: { aspectRatio },
                     },
                 }),
@@ -126,44 +126,52 @@ export class GeminiImageProvider implements IImageGenerator {
     private async buildRequestParts(request: ImageGenerationRequest): Promise<any[]> {
         const parts: any[] = [];
 
-        if (request.imageSource.key || request.imageSource.url) {
+        if (!request.imageSource.key && !request.imageSource.url) {
+            throw new Error('A room image is required for virtual staging');
+        }
+
+        try {
+            const roomImage = request.imageSource.key
+                ? {
+                      data: await this.imageResolver.toBase64(request.imageSource),
+                      mimeType: this.imageResolver.inferMimeType(request.imageSource.key),
+                  }
+                : await this.downloadInlineImage(request.imageSource.url!);
+
+            parts.push({ text: 'IMAGE 1: Client room and base image to edit.' });
+            parts.push({ inlineData: roomImage });
+            this.logger.debug('✅ Room image added');
+        } catch (e) {
+            this.logger.error(`❌ Could not load source image: ${e.message}`);
+            throw new Error(`Failed to load room image: ${e.message}`);
+        }
+
+        if (!request.referenceImages?.length) {
+            throw new Error('A selected product image is required for virtual staging');
+        }
+
+        this.logger.debug(`📦 Loading ${request.referenceImages.length} product images...`);
+        for (let i = 0; i < request.referenceImages.length; i++) {
             try {
-                const roomBase64 = await this.imageResolver.toBase64(request.imageSource);
-                const mimeType = request.imageSource.key
-                    ? this.imageResolver.inferMimeType(request.imageSource.key)
-                    : 'image/jpeg';
-
-                parts.push({ inlineData: { mimeType, data: roomBase64 } });
-                this.logger.debug('✅ Room image added');
+                const productImage = await this.downloadInlineImage(request.referenceImages[i]);
+                parts.push({ text: `IMAGE ${i + 2}: Selected catalog product reference.` });
+                parts.push({ inlineData: productImage });
             } catch (e) {
-                this.logger.error(`❌ Could not load source image: ${e.message}`);
-                throw new Error(`Failed to load room image: ${e.message}`);
+                this.logger.error(`❌ Failed product ${i + 1}: ${e.message}`);
+                throw new Error(`Failed to load selected product image: ${e.message}`);
             }
         }
-
-        if (request.referenceImages?.length) {
-            this.logger.debug(`📦 Loading ${request.referenceImages.length} product images...`);
-            let successCount = 0;
-
-            for (let i = 0; i < request.referenceImages.length; i++) {
-                try {
-                    const productBase64 = await this.imageResolver.toBase64({ url: request.referenceImages[i] });
-                    parts.push({ inlineData: { mimeType: 'image/jpeg', data: productBase64 } });
-                    successCount++;
-                } catch (e) {
-                    this.logger.error(`❌ Failed product ${i + 1}: ${e.message}`);
-                }
-            }
-
-            this.logger.log(`📦 Added ${successCount}/${request.referenceImages.length} product images`);
-        } else {
-            this.logger.warn('⚠️ No reference images provided');
-        }
+        this.logger.log(`📦 Added ${request.referenceImages.length} product images`);
 
         parts.push({ text: request.prompt });
-        this.logger.debug(`📤 Request: ${parts.length - 1} images + prompt`);
+        this.logger.debug(`📤 Request: ${request.referenceImages.length + 1} images + prompt`);
 
         return parts;
+    }
+
+    private async downloadInlineImage(url: string): Promise<{ mimeType: string; data: string }> {
+        const { buffer, mimeType } = await this.imageResolver.downloadFromUrl(url);
+        return { mimeType, data: buffer.toString('base64') };
     }
 
     private extractImageFromResponse(response: any): string {

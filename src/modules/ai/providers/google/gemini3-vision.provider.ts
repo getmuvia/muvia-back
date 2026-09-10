@@ -52,6 +52,7 @@ export class Gemini3VisionProvider implements IVisionProvider {
                         temperature: ROOM_ANALYSIS_PROMPT.generationConfig.temperature,
                         maxOutputTokens: ROOM_ANALYSIS_PROMPT.generationConfig.maxOutputTokens,
                         responseMimeType: 'application/json',
+                        responseJsonSchema: ROOM_ANALYSIS_PROMPT.outputSchema,
                     },
                 }),
                 {

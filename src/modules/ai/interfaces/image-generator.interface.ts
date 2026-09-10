@@ -3,8 +3,7 @@ import type { ImageSourceInput } from './vision-provider.interface';
 /**
  * Request parameters for AI image generation.
  *
- * Supports both room staging with reference products and
- * simple image generation from prompts.
+ * Supports room staging with catalog product references.
  */
 export interface ImageGenerationRequest {
     /** Source image (room to be staged) */
@@ -13,17 +12,11 @@ export interface ImageGenerationRequest {
     /** Text prompt describing the desired output */
     prompt: string;
 
-    /** Elements to avoid in the generated image */
-    negativePrompt?: string;
+    /** URLs of the selected catalog product images used as visual references */
+    referenceImages: string[];
 
-    /** URLs of product images to use as visual references */
-    referenceImages?: string[];
-
-    /** Output style preset */
-    style?: 'photorealistic' | 'artistic' | 'sketch';
-
-    /** 
-     * Output aspect ratio. 
+    /**
+     * Output aspect ratio.
      * Supported: '1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '5:4', '4:5'
      * If not provided, will try to match the source image aspect ratio.
      */
@@ -59,7 +52,8 @@ export interface ImageGenerationResult {
  * swapping image generation providers without changing business logic.
  *
  * Current implementations:
- * - ImagenProvider (Google Gemini multimodal)
+ * - GeminiImageProvider (active Google Gemini multimodal adapter)
+ * - ImagenProvider (alternative Google Gemini REST adapter)
  *
  * Future implementations could include:
  * - DALL-E (OpenAI)
