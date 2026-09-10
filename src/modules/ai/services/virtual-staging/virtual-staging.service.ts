@@ -19,7 +19,7 @@ import type {
     VirtualStagingResponseDto,
     VirtualStagingRequestDto,
 } from '../../dto/virtual-staging.dto';
-import { buildStagingPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
+import { buildStagingPrompt } from '../../prompts';
 import { User } from '../../../users/entities/user.entity';
 import { Product } from '../../../products/entities/product.entity';
 import { AssetType } from '../../../products/enums/asset-type.enum';
@@ -276,8 +276,10 @@ export class VirtualStagingService {
     ): string {
         return buildStagingPrompt({
             analysis,
-            products: [{ title: product.title, index: 0 }],
-            hasReferenceImages: true,
+            product: {
+                title: product.title,
+                description: product.description,
+            },
         });
     }
 
@@ -317,8 +319,6 @@ export class VirtualStagingService {
 
         const baseRequest = {
             prompt,
-            style: 'photorealistic' as const,
-            negativePrompt: STAGING_GENERATION_CONFIG.defaultNegativePrompt,
             referenceImages: [product.imageUrl],
         };
 

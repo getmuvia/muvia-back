@@ -10,7 +10,7 @@ import {
     ImageGenerationResult,
 } from '../../interfaces/image-generator.interface';
 import { RetryService, ImageResolverService } from '../../core';
-import { buildImageGenerationPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
+import { STAGING_GENERATION_CONFIG } from '../../prompts';
 
 /**
  * Gemini-based Image Generator implementation of IImageGenerator.
@@ -147,7 +147,7 @@ export class ImagenProvider implements IImageGenerator {
         }
 
         // Add text prompt
-        parts.push({ text: buildImageGenerationPrompt(request) });
+        parts.push({ text: request.prompt });
 
         return parts;
     }
