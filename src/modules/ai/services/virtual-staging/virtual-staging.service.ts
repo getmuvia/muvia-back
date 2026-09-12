@@ -23,6 +23,7 @@ import { buildStagingPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
 import { User } from '../../../users/entities/user.entity';
 import { Product } from '../../../products/entities/product.entity';
 import { AssetType } from '../../../products/enums/asset-type.enum';
+import { VirtualStagingStorageService } from './virtual-staging-storage.service';
 
 const DAILY_VIRTUAL_STAGING_LIMIT = 10;
 const QUOTA_TIME_ZONE = 'America/La_Paz';
@@ -57,6 +58,8 @@ export class VirtualStagingService {
 
         @InjectRepository(Product)
         private readonly productRepository: Repository<Product>,
+
+        private readonly stagingStorage: VirtualStagingStorageService,
     ) { }
 
     /**
@@ -99,33 +102,51 @@ export class VirtualStagingService {
         const startTime = Date.now();
 
         this.validateImageSource(dto);
-        const selectedProduct = await this.resolveSelectedProduct(dto.productId);
-        const quota = await this.reserveQuota(userId);
+        const uploadKey = this.getGcsKey(dto);
+
+        if (uploadKey) {
+            this.stagingStorage.assertOwnedUploadKey(uploadKey, userId);
+        }
 
         try {
-            this.logger.log(`Starting virtual staging...`);
+            const selectedProduct = await this.resolveSelectedProduct(dto.productId);
+            const quota = await this.reserveQuota(userId);
 
-            // 1. Analyze the room while preserving the user's product choice
-            const analysis = await this.analyzeRoomWithUrlFallback(dto);
-            if (dto.preferredStyle) analysis.style = dto.preferredStyle;
+            try {
+                this.logger.log('Starting virtual staging...');
 
-            // 2. Generate the staged image using only the explicitly selected product
-            const prompt = this.buildPromptForStaging(analysis, selectedProduct);
-            const generatedImage = await this.generateImageWithUrlFallback(dto, prompt, selectedProduct);
+                // 1. Analyze the room while preserving the user's product choice
+                const analysis = await this.analyzeRoomWithUrlFallback(dto);
+                if (dto.preferredStyle) analysis.style = dto.preferredStyle;
 
-            const processingTimeMs = Date.now() - startTime;
-            this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
+                // 2. Generate the staged image using only the explicitly selected product
+                const prompt = this.buildPromptForStaging(analysis, selectedProduct);
+                const generatedImage = await this.generateImageWithUrlFallback(
+                    dto,
+                    prompt,
+                    selectedProduct,
+                    userId,
+                );
 
-            return {
-                analysis,
-                selectedProduct,
-                stagedImageUrl: generatedImage.imageUrl,
-                quota,
-                metadata: { processingTimeMs, productsFound: 1 },
-            };
-        } catch (error) {
-            await this.refundQuotaSafely(userId);
-            throw error;
+                const processingTimeMs = Date.now() - startTime;
+                this.logger.log(`Virtual staging completed in ${processingTimeMs}ms`);
+
+                return {
+                    analysis,
+                    selectedProduct,
+                    stagedImageUrl: generatedImage.imageUrl,
+                    stagedImageExpiresAt: generatedImage.imageUrlExpiresAt,
+                    quota,
+                    metadata: { processingTimeMs, productsFound: 1 },
+                };
+            } catch (error) {
+                await this.refundQuotaSafely(userId);
+                throw error;
+            }
+        } finally {
+            if (uploadKey) {
+                await this.deleteUploadSafely(uploadKey);
+            }
         }
     }
 
@@ -290,7 +311,7 @@ export class VirtualStagingService {
 
         if (gcsKey) {
             try {
-                this.logger.debug(`Analyzing room via GCS key: ${gcsKey}`);
+                this.logger.debug('Analyzing room via private GCS object.');
                 return await this.visionProvider.analyzeRoom({ key: gcsKey });
             } catch (error) {
                 this.logger.warn(`GCS key analysis failed: ${error.message}`);
@@ -311,11 +332,13 @@ export class VirtualStagingService {
         dto: VirtualStagingRequestDto,
         prompt: string,
         product: VirtualStagingProductDto,
+        userId: string,
     ) {
         const gcsKey = this.getGcsKey(dto);
         const externalUrl = this.getExternalUrl(dto);
 
         const baseRequest = {
+            ownerId: userId,
             prompt,
             style: 'photorealistic' as const,
             negativePrompt: STAGING_GENERATION_CONFIG.defaultNegativePrompt,
@@ -330,6 +353,17 @@ export class VirtualStagingService {
             }
         }
         return await this.imageGenerator.generate({ ...baseRequest, imageSource: { url: externalUrl } });
+    }
+
+    private async deleteUploadSafely(uploadKey: string): Promise<void> {
+        try {
+            await this.stagingStorage.deleteUpload(uploadKey);
+        } catch (error) {
+            this.logger.error(
+                'Could not remove the temporary virtual-staging upload.',
+                error instanceof Error ? error.stack : undefined,
+            );
+        }
     }
 
 }

@@ -7,6 +7,9 @@ import type { ImageSourceInput } from './vision-provider.interface';
  * simple image generation from prompts.
  */
 export interface ImageGenerationRequest {
+    /** Authenticated owner used to isolate the generated result in private storage. */
+    ownerId: string;
+
     /** Source image (room to be staged) */
     imageSource: ImageSourceInput;
 
@@ -37,8 +40,14 @@ export interface ImageGenerationRequest {
  * for monitoring and debugging.
  */
 export interface ImageGenerationResult {
-    /** Public URL of the generated image (GCS-hosted) */
+    /** Temporary signed URL of the generated image. */
     imageUrl: string;
+
+    /** Private storage key of the generated image. */
+    imageKey: string;
+
+    /** ISO timestamp after which the signed URL stops working. */
+    imageUrlExpiresAt: string;
 
     /** Raw image buffer (optional, for further processing) */
     imageBuffer?: Buffer;

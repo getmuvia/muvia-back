@@ -23,6 +23,11 @@ export const envValidationSchema = Joi.object({
     then: Joi.required(),
     otherwise: Joi.optional(),
   }),
+  GOOGLE_AI_STORAGE_BUCKET: Joi.string().when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.optional(),
+  }),
 
   // Google Cloud Platform - Vertex AI
   GCP_PROJECT_ID: Joi.string().when('NODE_ENV', {

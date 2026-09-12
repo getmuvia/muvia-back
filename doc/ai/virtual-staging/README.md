@@ -207,8 +207,8 @@ GCP_IMAGEN_MODEL=gemini-3-pro-image-preview
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=text-embedding-004
 
-# Google Cloud Storage
-GOOGLE_STORAGE_BUCKET=my-bucket-name
+# Private Google Cloud Storage bucket for room photos and generated results
+GOOGLE_AI_STORAGE_BUCKET=my-private-ai-bucket-name
 ```
 
 > **Note:** Embedding models do NOT support the 'global' endpoint. Use regional endpoints like `us-central1`.
@@ -217,8 +217,8 @@ GOOGLE_STORAGE_BUCKET=my-bucket-name
 
 The service account must have:
 - `roles/aiplatform.user` (Vertex AI)
-- `roles/storage.objectViewer` (read images from GCS)
-- `roles/storage.objectCreator` (save generated images)
+- Object create, read and delete permissions on the private AI bucket
+- Service-account signing permission for V4 signed URLs
 
 ---
 

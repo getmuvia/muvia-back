@@ -35,7 +35,7 @@ export class VirtualStagingRequestDto {
 
     /**
      * Google Cloud Storage key for internally uploaded images.
-     * Use this when the image was uploaded via `/files/upload-url` endpoint.
+     * Use this when the image was uploaded via `/ai/virtual-staging/upload-url`.
      * Takes priority over `externalImageUrl` if both are provided.
      *
      * @example "virtual-staging/temp/abc123.jpg"
@@ -131,10 +131,12 @@ export interface VirtualStagingResponseDto {
     selectedProduct: VirtualStagingProductDto;
 
     /**
-     * Public URL of the generated staged image.
-     * Hosted on Google Cloud Storage with long cache duration.
+     * Temporary signed URL of the generated staged image.
      */
     stagedImageUrl: string;
+
+    /** ISO timestamp after which the signed result URL stops working. */
+    stagedImageExpiresAt: string;
 
     /** Updated quota after completing this generation. */
     quota: VirtualStagingQuotaDto;

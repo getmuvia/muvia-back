@@ -64,7 +64,7 @@ export class ImageResolverService {
     private readonly bucketName: string;
 
     constructor(private readonly configService: ConfigService) {
-        this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
+        this.bucketName = this.configService.get<string>('GOOGLE_AI_STORAGE_BUCKET') ?? '';
         this.storage = new Storage();
     }
 

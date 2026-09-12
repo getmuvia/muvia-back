@@ -2,6 +2,8 @@ import { Controller, Post, Get, UseGuards, Body } from '@nestjs/common';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { VirtualStagingService } from '../services/virtual-staging/virtual-staging.service';
+import { VirtualStagingStorageService } from '../services/virtual-staging/virtual-staging-storage.service';
+import { InitUploadDto } from '../../files/dto/upload-file.dto';
 import {
     VirtualStagingQuotaDto,
     VirtualStagingRequestDto,
@@ -15,13 +17,24 @@ import {
 @Controller('ai/virtual-staging')
 @UseGuards(JwtAuthGuard)
 export class VirtualStagingController {
-    constructor(private readonly stagingService: VirtualStagingService) { }
+    constructor(
+        private readonly stagingService: VirtualStagingService,
+        private readonly stagingStorage: VirtualStagingStorageService,
+    ) { }
 
     @Get('quota')
     async getQuota(
         @CurrentUser('id') userId: string,
     ): Promise<VirtualStagingQuotaDto> {
         return this.stagingService.getQuota(userId);
+    }
+
+    @Post('upload-url')
+    async getUploadUrl(
+        @Body() body: InitUploadDto,
+        @CurrentUser('id') userId: string,
+    ): Promise<{ url: string; key: string }> {
+        return this.stagingStorage.createUploadUrl(userId, body);
     }
 
     /**

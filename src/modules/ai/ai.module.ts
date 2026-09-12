@@ -16,6 +16,7 @@ import { VectorService } from './services/vector/vector.service';
 import { EmbeddingService } from './services/embedding/embedding.service';
 import { SearchService } from './services/search/search.service';
 import { VirtualStagingService } from './services/virtual-staging/virtual-staging.service';
+import { VirtualStagingStorageService } from './services/virtual-staging/virtual-staging-storage.service';
 
 // Controllers
 import { SearchController } from './controllers/search.controller';
@@ -92,6 +93,7 @@ import { MarketsModule } from '../markets/markets.module';
         },
 
         VirtualStagingService,
+        VirtualStagingStorageService,
     ],
 
     exports: [EmbeddingService],
