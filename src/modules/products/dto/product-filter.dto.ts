@@ -1,53 +1,87 @@
-import { IsOptional, IsString, IsNumber, IsUUID, IsArray, Min, Max } from 'class-validator';
+import {
+  IsArray,
+  IsEnum,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  Max,
+  Min,
+  ValidateIf,
+} from 'class-validator';
 import { Transform, Type } from 'class-transformer';
-import { Matches } from 'class-validator';
+
+export enum ProductDimension {
+  WIDTH = 'width',
+  HEIGHT = 'height',
+  DEPTH = 'depth',
+}
 
 export class ProductFilterDto {
-    @IsString()
-    @Matches(/^[A-Z]{2}$/)
-    @Transform(({ value }) => typeof value === 'string' ? value.trim().toUpperCase() : value)
-    @IsOptional()
-    marketCode?: string = 'BO';
+  @IsString()
+  @Matches(/^[A-Z]{2}$/)
+  @Transform(({ value }) => {
+    const marketCode: unknown = value;
+    return typeof marketCode === 'string'
+      ? marketCode.trim().toUpperCase()
+      : marketCode;
+  })
+  @IsOptional()
+  marketCode?: string = 'BO';
 
-    @IsString()
-    @IsOptional()
-    search?: string;
+  @IsString()
+  @IsOptional()
+  search?: string;
 
-    @IsArray()
-    @IsString({ each: true })
-    @IsOptional()
-    keywords?: string[];
+  @IsArray()
+  @IsString({ each: true })
+  @IsOptional()
+  keywords?: string[];
 
-    @IsUUID('4')
-    @IsOptional()
-    categoryId?: string;
+  @IsUUID('4')
+  @IsOptional()
+  categoryId?: string;
 
-    @IsUUID('4')
-    @IsOptional()
-    sellerId?: string;
+  @IsUUID('4')
+  @IsOptional()
+  sellerId?: string;
 
-    @IsNumber()
-    @Min(0)
-    @IsOptional()
-    @Type(() => Number)
-    minPrice?: number;
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  minPrice?: number;
 
-    @IsNumber()
-    @Min(0)
-    @IsOptional()
-    @Type(() => Number)
-    maxPrice?: number;
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  @Type(() => Number)
+  maxPrice?: number;
 
-    @IsNumber()
-    @Min(1)
-    @IsOptional()
-    @Type(() => Number)
-    page?: number = 1;
+  @ValidateIf(
+    (filters: ProductFilterDto) => filters.maxDimensionCm !== undefined,
+  )
+  @IsEnum(ProductDimension)
+  dimension?: ProductDimension;
 
-    @IsNumber()
-    @Min(1)
-    @Max(100)
-    @IsOptional()
-    @Type(() => Number)
-    limit?: number = 20;
+  @ValidateIf((filters: ProductFilterDto) => filters.dimension !== undefined)
+  @IsNumber()
+  @Min(1)
+  @Max(10000)
+  @Type(() => Number)
+  maxDimensionCm?: number;
+
+  @IsNumber()
+  @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  page?: number = 1;
+
+  @IsNumber()
+  @Min(1)
+  @Max(100)
+  @IsOptional()
+  @Type(() => Number)
+  limit?: number = 20;
 }
