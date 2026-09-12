@@ -5,12 +5,12 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { Repository, In, SelectQueryBuilder } from 'typeorm';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { ProductFilterDto } from './dto/product-filter.dto';
+import { ProductDimension, ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
 import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { SyncProductAssetDto } from './dto/sync-product-asset.dto';
@@ -308,7 +308,10 @@ export class ProductsService {
     }
   }
 
-  private applyFilters(queryBuilder: any, filters: Partial<ProductFilterDto>): void {
+  private applyFilters(
+    queryBuilder: SelectQueryBuilder<Product>,
+    filters: Partial<ProductFilterDto>,
+  ): void {
     if (filters.search) {
       const search = normalizeSearchText(filters.search);
       queryBuilder.andWhere(
@@ -348,6 +351,40 @@ export class ProductsService {
         maxPrice: filters.maxPrice,
       });
     }
+
+    if (filters.dimension && filters.maxDimensionCm !== undefined) {
+      this.applyDimensionFilter(
+        queryBuilder,
+        filters.dimension,
+        filters.maxDimensionCm,
+      );
+    }
+  }
+
+  private applyDimensionFilter(
+    queryBuilder: SelectQueryBuilder<Product>,
+    dimension: ProductDimension,
+    maxDimensionCm: number,
+  ): void {
+    const dimensionValue = `product.specifications -> 'dimensions' ->> '${dimension}'`;
+    const dimensionUnit = `LOWER(COALESCE(product.specifications -> 'dimensions' ->> 'unit', 'cm'))`;
+
+    queryBuilder.andWhere(
+      `(CASE
+        WHEN (${dimensionValue}) ~ :validDimension THEN
+          CASE ${dimensionUnit}
+            WHEN 'cm' THEN (${dimensionValue})::numeric
+            WHEN 'm' THEN (${dimensionValue})::numeric * 100
+            WHEN 'in' THEN (${dimensionValue})::numeric * 2.54
+            ELSE NULL
+          END
+        ELSE NULL
+      END) <= :maxDimensionCm`,
+      {
+        validDimension: '^\\d+(\\.\\d+)?$',
+        maxDimensionCm,
+      },
+    );
   }
 
   private async validateSelectableCategory(categoryId?: string | null): Promise<void> {
