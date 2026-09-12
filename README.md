@@ -44,6 +44,7 @@ JWT_ISSUER=muvia-api
 JWT_AUDIENCE=muvia-client
 
 GOOGLE_STORAGE_BUCKET=your-bucket-name
+GOOGLE_AI_STORAGE_BUCKET=your-private-ai-bucket-name
 
 GCP_PROJECT_ID=your-gcp-project-id
 GCP_LOCATION=global
@@ -94,6 +95,7 @@ This project validates core env vars with Nest Config + Joi and also reads addit
 ### Google Cloud Storage
 
 - `GOOGLE_STORAGE_BUCKET`: bucket name used by the files module
+- `GOOGLE_AI_STORAGE_BUCKET`: private bucket used only for virtual-staging uploads and results
 
 ### AI / Vertex / Gemini
 
@@ -123,6 +125,7 @@ Note: the project currently uses Google Cloud Storage by default in the files mo
 ### Storage value
 
 - `GOOGLE_STORAGE_BUCKET`: Cloud Storage > **Buckets**
+- `GOOGLE_AI_STORAGE_BUCKET`: a separate private bucket managed by the `muvia-infra` Terraform project
 
 ### AI values
 

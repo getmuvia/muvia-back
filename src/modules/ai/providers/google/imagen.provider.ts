@@ -1,9 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleAuth } from 'google-auth-library';
-import { Storage } from '@google-cloud/storage';
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 import {
     IImageGenerator,
     ImageGenerationRequest,
@@ -11,6 +9,7 @@ import {
 } from '../../interfaces/image-generator.interface';
 import { RetryService, ImageResolverService } from '../../core';
 import { buildImageGenerationPrompt, STAGING_GENERATION_CONFIG } from '../../prompts';
+import { VirtualStagingStorageService } from '../../services/virtual-staging/virtual-staging-storage.service';
 
 /**
  * Gemini-based Image Generator implementation of IImageGenerator.
@@ -24,9 +23,6 @@ import { buildImageGenerationPrompt, STAGING_GENERATION_CONFIG } from '../../pro
 @Injectable()
 export class ImagenProvider implements IImageGenerator {
     private readonly logger = new Logger(ImagenProvider.name);
-    private readonly storage: Storage;
-
-    private readonly bucketName: string;
     private readonly projectId: string;
     private readonly location: string;
     private readonly MODEL_NAME: string;
@@ -35,13 +31,11 @@ export class ImagenProvider implements IImageGenerator {
         private readonly configService: ConfigService,
         private readonly retryService: RetryService,
         private readonly imageResolver: ImageResolverService,
+        private readonly stagingStorage: VirtualStagingStorageService,
     ) {
         this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
         this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'us-central1');
-        this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET') ?? '';
         this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-2.5-flash-image');
-
-        this.storage = new Storage();
 
         this.logger.log(`✅ ImagenProvider initialized using model: ${this.MODEL_NAME} in ${this.location}`);
     }
@@ -77,10 +71,15 @@ export class ImagenProvider implements IImageGenerator {
             );
 
             const base64Image = this.extractImageFromResponse(response.data);
-            const imageUrl = await this.uploadToGcs(base64Image);
+            const storedImage = await this.stagingStorage.storeGeneratedImage(
+                base64Image,
+                request.ownerId,
+            );
 
             return {
-                imageUrl,
+                imageUrl: storedImage.url,
+                imageKey: storedImage.key,
+                imageUrlExpiresAt: storedImage.urlExpiresAt,
                 metadata: { model: this.MODEL_NAME, generationTimeMs: Date.now() - startTime },
             };
         } catch (error) {
@@ -170,16 +169,4 @@ export class ImagenProvider implements IImageGenerator {
         return generatedPart.inlineData.data;
     }
 
-    private async uploadToGcs(base64: string): Promise<string> {
-        const buffer = Buffer.from(base64, 'base64');
-        const filename = `generated/staging-${uuidv4()}.png`;
-        const file = this.storage.bucket(this.bucketName).file(filename);
-
-        await file.save(buffer, {
-            contentType: 'image/png',
-            metadata: { cacheControl: 'public, max-age=31536000' }
-        });
-
-        return `https://storage.googleapis.com/${this.bucketName}/${filename}`;
-    }
 }
