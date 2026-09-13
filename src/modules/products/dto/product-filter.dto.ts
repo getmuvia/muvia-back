@@ -11,12 +11,9 @@ import {
   ValidateIf,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
+import { ProductDimension } from '../../../common/search/product-measurement';
 
-export enum ProductDimension {
-  WIDTH = 'width',
-  HEIGHT = 'height',
-  DEPTH = 'depth',
-}
+export { ProductDimension };
 
 export class ProductFilterDto {
   @IsString()
