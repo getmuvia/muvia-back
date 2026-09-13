@@ -6,20 +6,31 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In, SelectQueryBuilder } from 'typeorm';
+import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
+import type { AssetMetadata } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { ProductDimension, ProductFilterDto } from './dto/product-filter.dto';
+import { ProductFilterDto } from './dto/product-filter.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
 import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { SyncProductAssetDto } from './dto/sync-product-asset.dto';
 import { EmbeddingService } from '../ai/services/embedding/embedding.service';
-import { normalizedSearchSql, normalizeSearchText } from '../../common/search/search-text';
+import {
+  normalizedSearchSql,
+  normalizeSearchText,
+} from '../../common/search/search-text';
 import { ProductListing } from './entities/product-listing.entity';
 import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { Category } from '../categories/entities/category.entity';
 import { MarketsService } from '../markets/markets.service';
+import {
+  ProductDimension,
+  VALID_PRODUCT_DIMENSION_PATTERN,
+  parseProductMeasurementSearch,
+  productDimensionCmSql,
+} from '../../common/search/product-measurement';
 
 @Injectable()
 export class ProductsService {
@@ -36,7 +47,7 @@ export class ProductsService {
     private readonly categoryRepository: Repository<Category>,
     private readonly embeddingService: EmbeddingService,
     private readonly marketsService: MarketsService,
-  ) { }
+  ) {}
 
   async create(sellerId: string, dto: CreateProductDto): Promise<Product> {
     const { assets, ...productData } = dto;
@@ -73,7 +84,13 @@ export class ProductsService {
     limit: number;
     totalPages: number;
   }> {
-    const { page = 1, limit = 20, marketCode = 'BO', ...filters } = filterDto;
+    const {
+      page = 1,
+      limit = 20,
+      marketCode = 'BO',
+      ...requestedFilters
+    } = filterDto;
+    const filters = this.resolveMeasurementSearch(requestedFilters);
     const skip = (page - 1) * limit;
     await this.marketsService.requireActive(marketCode);
 
@@ -84,7 +101,7 @@ export class ProductsService {
     queryBuilder.skip(skip).take(limit);
 
     const [data, total] = await queryBuilder.getManyAndCount();
-    data.forEach(product => this.applyListingSnapshot(product));
+    data.forEach((product) => this.applyListingSnapshot(product));
     return {
       data,
       total,
@@ -97,7 +114,14 @@ export class ProductsService {
   async findOne(id: string): Promise<Product> {
     const product = await this.productRepository.findOne({
       where: { id },
-      relations: ['assets', 'category', 'seller', 'listings', 'listings.market', 'listings.vendorLocation'],
+      relations: [
+        'assets',
+        'category',
+        'seller',
+        'listings',
+        'listings.market',
+        'listings.vendorLocation',
+      ],
     });
 
     if (!product) {
@@ -110,7 +134,13 @@ export class ProductsService {
   async findBySeller(sellerId: string): Promise<Product[]> {
     return this.productRepository.find({
       where: { sellerId },
-      relations: ['assets', 'category', 'listings', 'listings.market', 'listings.vendorLocation'],
+      relations: [
+        'assets',
+        'category',
+        'listings',
+        'listings.market',
+        'listings.vendorLocation',
+      ],
       order: { createdAt: 'DESC' },
     });
   }
@@ -132,7 +162,11 @@ export class ProductsService {
       .getMany();
   }
 
-  async update(id: string, sellerId: string, dto: UpdateProductDto): Promise<Product> {
+  async update(
+    id: string,
+    sellerId: string,
+    dto: UpdateProductDto,
+  ): Promise<Product> {
     const product = await this.findOne(id);
     this.validateOwnership(product, sellerId);
 
@@ -156,18 +190,23 @@ export class ProductsService {
     }
 
     if (this.shouldRegenerateEmbedding(dto)) {
-      this.triggerEmbeddingGeneration(id);
+      void this.triggerEmbeddingGeneration(id);
     }
 
     return this.findOne(id);
   }
 
-  private async syncAssets(productId: string, assets: SyncProductAssetDto[]): Promise<void> {
-    const existingAssets = await this.assetRepository.find({ where: { productId } });
-    const existingIds = existingAssets.map(a => a.id);
-    const incomingIds = assets.filter(a => a.id).map(a => a.id);
+  private async syncAssets(
+    productId: string,
+    assets: SyncProductAssetDto[],
+  ): Promise<void> {
+    const existingAssets = await this.assetRepository.find({
+      where: { productId },
+    });
+    const existingIds = existingAssets.map((a) => a.id);
+    const incomingIds = assets.filter((a) => a.id).map((a) => a.id);
 
-    const idsToDelete = existingIds.filter(id => !incomingIds.includes(id));
+    const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
     if (idsToDelete.length > 0) {
       await this.assetRepository.delete({ id: In(idsToDelete), productId });
     }
@@ -180,15 +219,17 @@ export class ProductsService {
           {
             url: assetDto.url,
             type: assetDto.type,
-            isPrimary: i === 0 ? true : assetDto.isPrimary ?? false,
-            metadata: assetDto.metadata as any,
+            isPrimary: i === 0 ? true : (assetDto.isPrimary ?? false),
+            metadata: assetDto.metadata as
+              | QueryDeepPartialEntity<AssetMetadata>
+              | undefined,
           },
         );
       } else {
         const newAsset = this.assetRepository.create({
           ...assetDto,
           productId,
-          isPrimary: i === 0 ? true : assetDto.isPrimary ?? false,
+          isPrimary: i === 0 ? true : (assetDto.isPrimary ?? false),
         });
         await this.assetRepository.save(newAsset);
       }
@@ -213,7 +254,11 @@ export class ProductsService {
     return this.assetRepository.save(asset);
   }
 
-  async removeAsset(productId: string, assetId: string, sellerId: string): Promise<void> {
+  async removeAsset(
+    productId: string,
+    assetId: string,
+    sellerId: string,
+  ): Promise<void> {
     const product = await this.findOne(productId);
     this.validateOwnership(product, sellerId);
 
@@ -249,12 +294,19 @@ export class ProductsService {
     return this.assetRepository.save(asset);
   }
 
-  async setPrimaryAsset(productId: string, assetId: string, sellerId: string): Promise<void> {
+  async setPrimaryAsset(
+    productId: string,
+    assetId: string,
+    sellerId: string,
+  ): Promise<void> {
     const product = await this.findOne(productId);
     this.validateOwnership(product, sellerId);
 
     await this.assetRepository.update({ productId }, { isPrimary: false });
-    await this.assetRepository.update({ id: assetId, productId }, { isPrimary: true });
+    await this.assetRepository.update(
+      { id: assetId, productId },
+      { isPrimary: true },
+    );
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -295,7 +347,7 @@ export class ProductsService {
       this.assetRepository.create({
         ...asset,
         productId,
-        isPrimary: index === 0 ? true : asset.isPrimary ?? false,
+        isPrimary: index === 0 ? true : (asset.isPrimary ?? false),
       }),
     );
 
@@ -304,7 +356,9 @@ export class ProductsService {
 
   private validateOwnership(product: Product, sellerId: string): void {
     if (product.sellerId !== sellerId) {
-      throw new ForbiddenException('You do not have permission to modify this product');
+      throw new ForbiddenException(
+        'You do not have permission to modify this product',
+      );
     }
   }
 
@@ -315,9 +369,11 @@ export class ProductsService {
     if (filters.search) {
       const search = normalizeSearchText(filters.search);
       queryBuilder.andWhere(
-        search ? `(${normalizedSearchSql('product.title')} LIKE :search
+        search
+          ? `(${normalizedSearchSql('product.title')} LIKE :search
           OR ${normalizedSearchSql('product.description')} LIKE :search
-          OR ${normalizedSearchSql("array_to_string(product.keywords, ' ')")} LIKE :search)` : '1 = 0',
+          OR ${normalizedSearchSql("array_to_string(product.keywords, ' ')")} LIKE :search)`
+          : '1 = 0',
         { search: `%${search}%` },
       );
     }
@@ -366,55 +422,85 @@ export class ProductsService {
     dimension: ProductDimension,
     maxDimensionCm: number,
   ): void {
-    const dimensionValue = `product.specifications -> 'dimensions' ->> '${dimension}'`;
-    const dimensionUnit = `LOWER(COALESCE(product.specifications -> 'dimensions' ->> 'unit', 'cm'))`;
-
     queryBuilder.andWhere(
-      `(CASE
-        WHEN (${dimensionValue}) ~ :validDimension THEN
-          CASE ${dimensionUnit}
-            WHEN 'cm' THEN (${dimensionValue})::numeric
-            WHEN 'm' THEN (${dimensionValue})::numeric * 100
-            WHEN 'in' THEN (${dimensionValue})::numeric * 2.54
-            ELSE NULL
-          END
-        ELSE NULL
-      END) <= :maxDimensionCm`,
+      `${productDimensionCmSql('product', dimension, ':validDimension')} <= :maxDimensionCm`,
       {
-        validDimension: '^\\d+(\\.\\d+)?$',
+        validDimension: VALID_PRODUCT_DIMENSION_PATTERN,
         maxDimensionCm,
       },
     );
   }
 
-  private async validateSelectableCategory(categoryId?: string | null): Promise<void> {
+  private resolveMeasurementSearch(
+    filters: Partial<ProductFilterDto>,
+  ): Partial<ProductFilterDto> {
+    if (
+      !filters.search ||
+      (filters.dimension && filters.maxDimensionCm !== undefined)
+    ) {
+      return filters;
+    }
+
+    const parsedSearch = parseProductMeasurementSearch(filters.search);
+    if (!parsedSearch.measurement) return filters;
+
+    return {
+      ...filters,
+      search: parsedSearch.query || undefined,
+      dimension: parsedSearch.measurement.dimension,
+      maxDimensionCm: parsedSearch.measurement.maxDimensionCm,
+    };
+  }
+
+  private async validateSelectableCategory(
+    categoryId?: string | null,
+  ): Promise<void> {
     if (!categoryId) return;
-    const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-    if (!category) throw new NotFoundException(`Category with ID ${categoryId} not found`);
+    const category = await this.categoryRepository.findOne({
+      where: { id: categoryId },
+    });
+    if (!category)
+      throw new NotFoundException(`Category with ID ${categoryId} not found`);
     if (!category.isSelectable) {
-      throw new BadRequestException('Products must use a specific selectable category');
+      throw new BadRequestException(
+        'Products must use a specific selectable category',
+      );
     }
   }
 
-  private async createDefaultListing(product: Product, sellerId: string): Promise<void> {
+  private async createDefaultListing(
+    product: Product,
+    sellerId: string,
+  ): Promise<void> {
     const location = await this.vendorLocationRepository
       .createQueryBuilder('location')
-      .innerJoin('location.vendorProfile', 'profile', 'profile.userId = :sellerId', { sellerId })
+      .innerJoin(
+        'location.vendorProfile',
+        'profile',
+        'profile.userId = :sellerId',
+        { sellerId },
+      )
       .where('location.isPrimary = true')
       .getOne();
     if (!location) {
-      throw new BadRequestException('Complete the vendor business location before creating products');
+      throw new BadRequestException(
+        'Complete the vendor business location before creating products',
+      );
     }
-    const market = await this.marketsService.requireActive(location.countryCode);
-    await this.listingRepository.save(this.listingRepository.create({
-      productId: product.id,
-      vendorLocationId: location.id,
-      marketCode: market.code,
-      price: product.price,
-      currencyCode: market.currencyCode,
-      stock: product.stock ?? 0,
-      isActive: true,
-    }));
+    const market = await this.marketsService.requireActive(
+      location.countryCode,
+    );
+    await this.listingRepository.save(
+      this.listingRepository.create({
+        productId: product.id,
+        vendorLocationId: location.id,
+        marketCode: market.code,
+        price: product.price,
+        currencyCode: market.currencyCode,
+        stock: product.stock ?? 0,
+        isActive: true,
+      }),
+    );
   }
 
   private applyListingSnapshot(product: Product): void {
