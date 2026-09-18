@@ -24,7 +24,7 @@ export const AI_DEVELOPMENT_DEFAULTS = {
   visionLocation: 'global',
   visionModel: 'gemini-3.5-flash-lite',
   imageLocation: 'global',
-  imageModel: 'gemini-2.5-flash-image',
+  imageModel: 'gemini-3.1-flash-image',
   embeddingLocation: 'us-central1',
   embeddingModel: 'text-embedding-004',
 } as const;

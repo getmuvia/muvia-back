@@ -51,7 +51,7 @@ GCP_LOCATION=global
 GCP_GEMINI_MODEL=gemini-3.5-flash-lite
 
 GCP_IMAGEN_LOCATION=global
-GCP_IMAGEN_MODEL=gemini-2.5-flash-image
+GCP_IMAGEN_MODEL=gemini-3.1-flash-image
 
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=text-embedding-004

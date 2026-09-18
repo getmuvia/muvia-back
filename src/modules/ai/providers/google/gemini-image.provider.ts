@@ -61,9 +61,14 @@ export class GeminiImageProvider implements IImageGenerator {
                     model: this.MODEL_NAME,
                     contents: contentParts,
                     config: {
-                        responseModalities: ['IMAGE'],
-                        temperature: IMAGE_GENERATION_CONFIG.generationConfig.temperature,
-                        imageConfig: { aspectRatio },
+                        responseModalities: [
+                            ...IMAGE_GENERATION_CONFIG.generationConfig.responseModalities,
+                        ],
+                        candidateCount: IMAGE_GENERATION_CONFIG.generationConfig.candidateCount,
+                        imageConfig: {
+                            aspectRatio,
+                            imageSize: IMAGE_GENERATION_CONFIG.generationConfig.imageSize,
+                        },
                     },
                 }),
                 {
@@ -182,8 +187,7 @@ export class GeminiImageProvider implements IImageGenerator {
 
         const imagePart = content.parts.find((part: any) => part.inlineData?.data);
         if (!imagePart?.inlineData?.data) {
-            this.logger.error('Response structure:', JSON.stringify(candidates[0]));
-            throw new Error('Model returned text instead of image');
+            throw new Error('Model response did not include an image');
         }
 
         return imagePart.inlineData.data;

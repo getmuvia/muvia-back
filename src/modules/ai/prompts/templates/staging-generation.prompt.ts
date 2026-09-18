@@ -4,7 +4,7 @@ import type { RoomAnalysisResult } from '../../interfaces/vision-provider.interf
  * Virtual Staging Generation Prompt Template
  * Used by image generators to create professionally staged room images.
  *
- * @version 2.0.0
+ * @version 2.1.0
  * @provider GeminiImageGenerator, DALL-E (compatible)
  */
 
@@ -134,7 +134,7 @@ Generate a SINGLE photorealistic image showing:
 - A COMPLETE, professional interior design with complementary furniture and accessories
 - Magazine-quality staging that would impress a real estate professional
 
-DO NOT output text. Output ONLY the final decorated room image.`;
+Generate the final decorated room image. Keep any accompanying text brief; the client uses only the image.`;
 }
 
 /**
@@ -162,13 +162,7 @@ Transform this empty room into a beautifully decorated, magazine-worthy living s
  * Staging prompt configuration.
  */
 export const STAGING_GENERATION_CONFIG = {
-    version: '2.0.0',
-
-    generationConfig: {
-        responseModalities: ['IMAGE'],
-        temperature: 0.6, // Increased for more creativity
-        maxOutputTokens: 8192,
-    },
+    version: '2.1.0',
 
     safetySettings: [
         { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
