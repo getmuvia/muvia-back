@@ -1,18 +1,54 @@
+import { Type, type Schema } from '@google/genai';
+
+const ROOM_ANALYSIS_OUTPUT_SCHEMA = {
+    type: Type.OBJECT,
+    required: [
+        'roomType',
+        'style',
+        'emptyAreas',
+        'suggestedFurniture',
+        'colorPalette',
+    ],
+    properties: {
+        roomType: { type: Type.STRING },
+        style: { type: Type.STRING },
+        emptyAreas: { type: Type.ARRAY, items: { type: Type.STRING } },
+        suggestedFurniture: { type: Type.ARRAY, items: { type: Type.STRING } },
+        colorPalette: { type: Type.ARRAY, items: { type: Type.STRING } },
+        dimensions: {
+            type: Type.OBJECT,
+            required: ['width', 'depth'],
+            properties: {
+                width: {
+                    type: Type.STRING,
+                    format: 'enum',
+                    enum: ['small', 'medium', 'large'],
+                },
+                depth: {
+                    type: Type.STRING,
+                    format: 'enum',
+                    enum: ['compact', 'spacious'],
+                },
+            },
+        },
+    },
+} satisfies Schema;
+
 /**
  * Room Analysis Prompt Template
  * Used by vision providers to analyze room images for virtual staging.
  *
- * @version 1.0.0
+ * @version 1.1.0
  * @provider GeminiVision, OpenAI Vision (compatible)
  */
 export const ROOM_ANALYSIS_PROMPT = {
-    version: '1.0.0',
+    version: '1.1.0',
 
     /**
      * Main prompt template for room analysis.
      * Expects the AI to return structured JSON with room details.
      */
-    template: `Analyze this room image for virtual furniture staging. 
+    template: `Analyze this room image for virtual furniture staging.
         
 Identify and return a JSON object with:
 - roomType: The type of room (living room, bedroom, dining room, office, kitchen, bathroom, etc.)
@@ -26,30 +62,12 @@ Return ONLY valid JSON, no markdown or explanations.`,
     /**
      * Expected output schema for validation.
      */
-    outputSchema: {
-        type: 'object',
-        required: ['roomType', 'style', 'emptyAreas', 'suggestedFurniture', 'colorPalette'],
-        properties: {
-            roomType: { type: 'string' },
-            style: { type: 'string' },
-            emptyAreas: { type: 'array', items: { type: 'string' } },
-            suggestedFurniture: { type: 'array', items: { type: 'string' } },
-            colorPalette: { type: 'array', items: { type: 'string' } },
-            dimensions: {
-                type: 'object',
-                properties: {
-                    width: { enum: ['small', 'medium', 'large'] },
-                    depth: { enum: ['compact', 'spacious'] },
-                },
-            },
-        },
-    },
+    outputSchema: ROOM_ANALYSIS_OUTPUT_SCHEMA,
 
     /**
      * Recommended generation config for this prompt.
      */
     generationConfig: {
-        temperature: 0.2,
         maxOutputTokens: 8192,
         responseMimeType: 'application/json',
     },

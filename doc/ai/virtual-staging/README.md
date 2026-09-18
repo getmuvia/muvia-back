@@ -196,8 +196,8 @@ src/modules/ai/
 GCP_PROJECT_ID=my-project-id
 
 # Vision analysis
-GCP_LOCATION=us-central1
-GCP_GEMINI_MODEL=gemini-2.5-flash
+GCP_LOCATION=global
+GCP_GEMINI_MODEL=gemini-3.5-flash-lite
 
 # Image Generation (specific)
 GCP_IMAGEN_LOCATION=global

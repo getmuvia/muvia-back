@@ -9,6 +9,7 @@ import {
 import { RetryService, ImageResolverService } from '../../core';
 import { ROOM_ANALYSIS_PROMPT } from '../../prompts';
 import { AI_ENV_KEYS } from '../../../../config/ai.config';
+import { parseRoomAnalysisResponse } from './room-analysis-response.parser';
 
 @Injectable()
 export class GeminiVisionProvider implements IVisionProvider {
@@ -49,9 +50,9 @@ export class GeminiVisionProvider implements IVisionProvider {
                     model: this.MODEL_NAME,
                     contents: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }],
                     config: {
-                        temperature: ROOM_ANALYSIS_PROMPT.generationConfig.temperature,
                         maxOutputTokens: ROOM_ANALYSIS_PROMPT.generationConfig.maxOutputTokens,
-                        responseMimeType: 'application/json',
+                        responseMimeType: ROOM_ANALYSIS_PROMPT.generationConfig.responseMimeType,
+                        responseSchema: ROOM_ANALYSIS_PROMPT.outputSchema,
                     },
                 }),
                 {
@@ -62,9 +63,10 @@ export class GeminiVisionProvider implements IVisionProvider {
             );
 
             if (!response.text) throw new Error('No response from Gemini Vision');
-            return this.parseResponse(response.text);
+            return parseRoomAnalysisResponse(response.text);
         } catch (error) {
-            this.logger.error(`Room analysis failed: ${error.message}`);
+            const message = error instanceof Error ? error.message : 'Unknown error';
+            this.logger.error(`Room analysis failed: ${message}`);
             throw error;
         }
     }
@@ -73,24 +75,5 @@ export class GeminiVisionProvider implements IVisionProvider {
         const base64Data = await this.imageResolver.toBase64(input);
         const mimeType = input.key ? this.imageResolver.inferMimeType(input.key) : 'image/jpeg';
         return { inlineData: { mimeType, data: base64Data } };
-    }
-
-    private parseResponse(text: string): RoomAnalysisResult {
-        try {
-            const cleanJson = text.replace(/```json\n?|\n?```/g, '').trim();
-            const parsed = JSON.parse(cleanJson);
-
-            return {
-                roomType: parsed.roomType || 'unknown',
-                style: parsed.style || 'modern',
-                emptyAreas: Array.isArray(parsed.emptyAreas) ? parsed.emptyAreas : [],
-                suggestedFurniture: Array.isArray(parsed.suggestedFurniture) ? parsed.suggestedFurniture : [],
-                colorPalette: Array.isArray(parsed.colorPalette) ? parsed.colorPalette : [],
-                dimensions: parsed.dimensions,
-            };
-        } catch (error) {
-            this.logger.error(`Failed to parse response: ${text}`);
-            throw new Error('Invalid response format from vision model');
-        }
     }
 }
