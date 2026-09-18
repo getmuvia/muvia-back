@@ -15,6 +15,11 @@ describe('envValidationSchema AI configuration', () => {
     expect(AI_DEVELOPMENT_DEFAULTS.visionLocation).toBe('global');
   });
 
+  it('uses the recommended HU3 image model and global location by default', () => {
+    expect(AI_DEVELOPMENT_DEFAULTS.imageModel).toBe('gemini-3.1-flash-image');
+    expect(AI_DEVELOPMENT_DEFAULTS.imageLocation).toBe('global');
+  });
+
   it('applies the centralized defaults outside production', () => {
     const { error, value } = envValidationSchema.validate({
       ...baseEnvironment,

@@ -1,10 +1,11 @@
+import { Modality } from '@google/genai';
 import type { ImageGenerationRequest } from '../../interfaces/image-generator.interface';
 
 /**
  * Generic Image Generation Prompt Template
  * Used by image generators for basic room furnishing without specific products.
  *
- * @version 1.0.0
+ * @version 1.1.0
  * @provider GeminiImageGenerator, DALL-E (compatible)
  */
 
@@ -29,19 +30,19 @@ STRICT RULES:
 ${hasProducts ? '2. Use the visual details from the furniture reference images to place them in the room.' : ''}
 3. ${request.prompt}
 4. Style: ${request.style || 'Modern'}.
-5. Output ONLY the final generated image.`;
+5. Generate the final image. Keep any accompanying text brief; the client uses only the image.`;
 }
 
 /**
  * Configuration for generic image generation.
  */
 export const IMAGE_GENERATION_CONFIG = {
-    version: '1.0.0',
+    version: '1.1.0',
 
     generationConfig: {
-        responseModalities: ['IMAGE'],
-        temperature: 0.4,
-        maxOutputTokens: 8192,
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+        candidateCount: 1,
+        imageSize: '1K',
     },
 
     safetySettings: [
