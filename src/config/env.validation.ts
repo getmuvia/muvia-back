@@ -1,4 +1,5 @@
 import * as Joi from 'joi';
+import { AI_DEVELOPMENT_DEFAULTS } from './ai.config';
 
 export const envValidationSchema = Joi.object({
   NODE_ENV: Joi.string()
@@ -35,12 +36,36 @@ export const envValidationSchema = Joi.object({
     then: Joi.required(),
     otherwise: Joi.optional(),
   }),
-  GCP_LOCATION: Joi.string().default('us-central1'),
-  GCP_GEMINI_MODEL: Joi.string().default('gemini-2.5-flash'),
-  GCP_IMAGEN_LOCATION: Joi.string().default('us-central1'),
-  GCP_IMAGEN_MODEL: Joi.string().default('gemini-2.5-flash-image'),
-  GCP_EMBEDDING_LOCATION: Joi.string().default('us-central1'),
-  GCP_EMBEDDING_MODEL: Joi.string().default('text-embedding-004'),
+  GCP_LOCATION: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.visionLocation),
+  }),
+  GCP_GEMINI_MODEL: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.visionModel),
+  }),
+  GCP_IMAGEN_LOCATION: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.imageLocation),
+  }),
+  GCP_IMAGEN_MODEL: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.imageModel),
+  }),
+  GCP_EMBEDDING_LOCATION: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.embeddingLocation),
+  }),
+  GCP_EMBEDDING_MODEL: Joi.string().trim().min(1).when('NODE_ENV', {
+    is: 'production',
+    then: Joi.required(),
+    otherwise: Joi.string().default(AI_DEVELOPMENT_DEFAULTS.embeddingModel),
+  }),
   GCP_3D_LOCATION: Joi.string().default('us-central1'),
   GCP_3D_WORKER_IMAGE_URI: Joi.string().optional(),
 });

@@ -41,7 +41,7 @@ The system is designed to be **AI provider-agnostic**. Business logic doesn't kn
 │                         ADAPTERS (Implementations)                          │
 │                                                                             │
 │  providers/google/                                                          │
-│  ├── Gemini3VisionProvider   (implements IVisionProvider)                   │
+│  ├── GeminiVisionProvider    (implements IVisionProvider)                   │
 │  ├── GeminiImageProvider     (implements IImageGenerator)                   │
 │  └── VertexEmbeddingProvider (implements IEmbeddingProvider)                │
 │                                                                             │
@@ -56,8 +56,8 @@ The system is designed to be **AI provider-agnostic**. Business logic doesn't kn
 
 | Component | SDK | Purpose |
 |-----------|-----|---------|
-| **Vision Analysis** | `@google/genai` | Room analysis with Gemini 3 |
-| **Image Generation** | `@google/genai` | Virtual staging with Gemini 3 |
+| **Vision Analysis** | `@google/genai` | Room analysis with configured Gemini model |
+| **Image Generation** | `@google/genai` | Virtual staging with configured Gemini image model |
 | **Embeddings** | `@google-cloud/aiplatform` | Product vector embeddings |
 | **Storage** | `@google-cloud/storage` | GCS for images |
 
@@ -69,7 +69,7 @@ To switch from Google to OpenAI, only modify `ai.module.ts`:
 // Before (Google)
 {
     provide: VISION_PROVIDER,
-    useClass: Gemini3VisionProvider,
+    useClass: GeminiVisionProvider,
 }
 
 // After (OpenAI)
@@ -93,7 +93,7 @@ To switch from Google to OpenAI, only modify `ai.module.ts`:
                                 │
                                 ▼
 ┌──────────────────────────────────────────────────────────────────────────┐
-│  1️⃣ IMAGE ANALYSIS (Gemini3VisionProvider)                              │
+│  1️⃣ IMAGE ANALYSIS (GeminiVisionProvider)                               │
 │                                                                          │
 │  Input: Empty room image                                                 │
 │  Output: RoomAnalysisResult                                              │
@@ -161,7 +161,7 @@ src/modules/ai/
 │
 ├── providers/
 │   ├── google/
-│   │   ├── gemini3-vision.provider.ts
+│   │   ├── gemini-vision.provider.ts
 │   │   ├── gemini-image.provider.ts
 │   │   ├── vertex-embedding.provider.ts
 │   │   └── index.ts
@@ -195,13 +195,13 @@ src/modules/ai/
 # Google Cloud Platform
 GCP_PROJECT_ID=my-project-id
 
-# Vision & Image Generation (Gemini 3)
-GCP_LOCATION=global
-GCP_GEMINI_MODEL=gemini-3-pro-preview
+# Vision analysis
+GCP_LOCATION=us-central1
+GCP_GEMINI_MODEL=gemini-2.5-flash
 
 # Image Generation (specific)
 GCP_IMAGEN_LOCATION=global
-GCP_IMAGEN_MODEL=gemini-3-pro-image-preview
+GCP_IMAGEN_MODEL=gemini-2.5-flash-image
 
 # Embeddings (Vertex AI)
 GCP_EMBEDDING_LOCATION=us-central1

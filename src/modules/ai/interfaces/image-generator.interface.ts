@@ -68,7 +68,7 @@ export interface ImageGenerationResult {
  * swapping image generation providers without changing business logic.
  *
  * Current implementations:
- * - ImagenProvider (Google Gemini multimodal)
+ * - GeminiImageProvider (Google Gemini multimodal)
  *
  * Future implementations could include:
  * - DALL-E (OpenAI)

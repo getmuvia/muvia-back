@@ -7,6 +7,7 @@ import {
     EmbeddingTaskType,
 } from '../../interfaces/embedding-provider.interface';
 import { RetryService } from '../../core/retry';
+import { AI_ENV_KEYS } from '../../../../config/ai.config';
 
 @Injectable()
 export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
@@ -22,9 +23,9 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
         private readonly configService: ConfigService,
         private readonly retryService: RetryService,
     ) {
-        this.projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
-        this.location = this.configService.get<string>('GCP_EMBEDDING_LOCATION', 'us-central1');
-        this.MODEL_NAME = this.configService.get<string>('GCP_EMBEDDING_MODEL', 'text-embedding-004');
+        this.projectId = this.configService.get<string>(AI_ENV_KEYS.projectId) ?? '';
+        this.location = this.configService.getOrThrow<string>(AI_ENV_KEYS.embeddingLocation);
+        this.MODEL_NAME = this.configService.getOrThrow<string>(AI_ENV_KEYS.embeddingModel);
     }
 
     onModuleInit(): void {

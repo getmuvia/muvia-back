@@ -47,11 +47,11 @@ GOOGLE_STORAGE_BUCKET=your-bucket-name
 GOOGLE_AI_STORAGE_BUCKET=your-private-ai-bucket-name
 
 GCP_PROJECT_ID=your-gcp-project-id
-GCP_LOCATION=global
-GCP_GEMINI_MODEL=gemini-3-pro-preview
+GCP_LOCATION=us-central1
+GCP_GEMINI_MODEL=gemini-2.5-flash
 
 GCP_IMAGEN_LOCATION=global
-GCP_IMAGEN_MODEL=gemini-3-pro-image-preview
+GCP_IMAGEN_MODEL=gemini-2.5-flash-image
 
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=text-embedding-004
@@ -72,7 +72,10 @@ API default URL: `http://localhost:3000`
 
 ## Environment Variables Explained
 
-This project validates core env vars with Nest Config + Joi and also reads additional AI/storage settings directly from the config service.
+This project validates environment variables with Nest Config + Joi. AI model
+and location defaults for development and tests are centralized in
+`src/config/ai.config.ts`. Production must provide every AI model and location
+explicitly; infrastructure injects those values into Cloud Run.
 
 ### Database
 
@@ -105,7 +108,11 @@ This project validates core env vars with Nest Config + Joi and also reads addit
 - `GCP_IMAGEN_LOCATION`: location for image generation
 - `GCP_IMAGEN_MODEL`: model for generated images / virtual staging
 - `GCP_EMBEDDING_LOCATION`: embeddings location (recommended `us-central1`)
-- `GCP_EMBEDDING_MODEL`: embedding model (recommended `text-embedding-004`)
+- `GCP_EMBEDDING_MODEL`: embedding model
+
+The values in the setup example are development defaults. Do not treat them as
+production recommendations; model migrations and lifecycle changes must be
+applied through the infrastructure configuration.
 
 Note: the project currently uses Google Cloud Storage by default in the files module.
 
