@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, IsNull } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Product } from '../../products/entities/product.entity';
 import { SearchProductResult } from '../interfaces/search-result.interface';
+import { AI_ENV_KEYS } from '../../../config/ai.config';
 import {
   VALID_PRODUCT_DIMENSION_PATTERN,
   productDimensionCmSql,
@@ -20,11 +22,17 @@ type RawSearchProductResult = Omit<SearchProductResult, 'similarity'> & {
 @Injectable()
 export class ProductVectorRepository {
   private readonly logger = new Logger(ProductVectorRepository.name);
+  private readonly embeddingModel: string;
 
   constructor(
     @InjectRepository(Product)
     private readonly repository: Repository<Product>,
-  ) {}
+    configService: ConfigService,
+  ) {
+    this.embeddingModel = configService.getOrThrow<string>(
+      AI_ENV_KEYS.embeddingModel,
+    );
+  }
 
   /**
    * Finds products similar to the given embedding vector.
@@ -45,10 +53,11 @@ export class ProductVectorRepository {
             threshold,
             marketCode,
             limit,
+            this.embeddingModel,
             VALID_PRODUCT_DIMENSION_PATTERN,
             measurement.maxDimensionCm,
           ]
-        : [embedding, threshold, marketCode, limit],
+        : [embedding, threshold, marketCode, limit, this.embeddingModel],
     );
 
     return this.mapToResults(raw);
@@ -60,16 +69,24 @@ export class ProductVectorRepository {
    */
   async updateEmbedding(productId: string, embedding: string): Promise<void> {
     await this.repository.query(
-      `UPDATE products SET embedding = $1::vector WHERE id = $2`,
-      [embedding, productId],
+      `UPDATE products
+       SET embedding = $1::vector, embedding_model = $2
+       WHERE id = $3`,
+      [embedding, this.embeddingModel, productId],
     );
   }
 
   /**
-   * Retrieves all products without an embedding.
+   * Retrieves products whose embedding is missing or belongs to another model.
    */
-  async findWithoutEmbedding(): Promise<Product[]> {
-    return this.repository.find({ where: { embedding: IsNull() } });
+  async findPendingEmbeddingRefresh(): Promise<Product[]> {
+    return this.repository
+      .createQueryBuilder('product')
+      .where('product.embedding IS NULL')
+      .orWhere('product.embedding_model IS DISTINCT FROM :embeddingModel', {
+        embeddingModel: this.embeddingModel,
+      })
+      .getMany();
   }
 
   /**
@@ -85,7 +102,7 @@ export class ProductVectorRepository {
    */
   private getSimilarityQuery(measurement?: ProductMeasurementFilter): string {
     const dimensionFilter = measurement
-      ? `AND ${productDimensionCmSql('p', measurement.dimension, '$5')} <= $6`
+      ? `AND ${productDimensionCmSql('p', measurement.dimension, '$6')} <= $7`
       : '';
     return `
             SELECT 
@@ -113,6 +130,7 @@ export class ProductVectorRepository {
             LEFT JOIN categories category ON category.id = p.category_id
             WHERE p.embedding IS NOT NULL
                 AND 1 - (p.embedding <=> $1::vector) >= $2
+                AND p.embedding_model = $5
                 ${dimensionFilter}
             ORDER BY p.embedding <=> $1::vector ASC
             LIMIT $4

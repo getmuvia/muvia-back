@@ -20,6 +20,11 @@ describe('envValidationSchema AI configuration', () => {
     expect(AI_DEVELOPMENT_DEFAULTS.imageLocation).toBe('global');
   });
 
+  it('uses the recommended HU4 text embedding model and regional endpoint', () => {
+    expect(AI_DEVELOPMENT_DEFAULTS.embeddingModel).toBe('gemini-embedding-001');
+    expect(AI_DEVELOPMENT_DEFAULTS.embeddingLocation).toBe('us-central1');
+  });
+
   it('applies the centralized defaults outside production', () => {
     const { error, value } = envValidationSchema.validate({
       ...baseEnvironment,

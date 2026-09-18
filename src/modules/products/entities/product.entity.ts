@@ -55,11 +55,15 @@ export class Product {
     keywords: string[];
 
     /**
-     * Vector embedding for semantic search (768 dimensions from Vertex AI text-embedding-004).
+     * Normalized vector embedding for semantic search (768 dimensions).
      * Requires pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
      */
     @Column('vector', { length: 768, nullable: true, select: false })
     embedding: string;
+
+    /** Model that generated the stored vector. Prevents mixing incompatible spaces. */
+    @Column({ name: 'embedding_model', type: 'varchar', length: 100, nullable: true, select: false })
+    embeddingModel: string;
 
     @CreateDateColumn()
     createdAt: Date;

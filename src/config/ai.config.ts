@@ -26,5 +26,10 @@ export const AI_DEVELOPMENT_DEFAULTS = {
   imageLocation: 'global',
   imageModel: 'gemini-3.1-flash-image',
   embeddingLocation: 'us-central1',
-  embeddingModel: 'text-embedding-004',
+  embeddingModel: 'gemini-embedding-001',
+} as const;
+
+/** Runtime invariants coupled to the current database schema. */
+export const AI_RUNTIME_SETTINGS = {
+  embeddingDimensions: 768,
 } as const;

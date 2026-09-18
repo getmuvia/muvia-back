@@ -205,7 +205,7 @@ GCP_IMAGEN_MODEL=gemini-3.1-flash-image
 
 # Embeddings (Vertex AI)
 GCP_EMBEDDING_LOCATION=us-central1
-GCP_EMBEDDING_MODEL=text-embedding-004
+GCP_EMBEDDING_MODEL=gemini-embedding-001
 
 # Private Google Cloud Storage bucket for room photos and generated results
 GOOGLE_AI_STORAGE_BUCKET=my-private-ai-bucket-name
