@@ -11,6 +11,7 @@ import { RetryService, ImageResolverService } from '../../core';
 import { IMAGE_GENERATION_CONFIG } from '../../prompts';
 import { getImageDimensions, mapToSupportedAspectRatio } from '../helpers';
 import { VirtualStagingStorageService } from '../../services/virtual-staging/virtual-staging-storage.service';
+import { AI_ENV_KEYS } from '../../../../config/ai.config';
 
 @Injectable()
 export class GeminiImageProvider implements IImageGenerator {
@@ -27,10 +28,10 @@ export class GeminiImageProvider implements IImageGenerator {
         private readonly imageResolver: ImageResolverService,
         private readonly stagingStorage: VirtualStagingStorageService,
     ) {
-        const projectId = this.configService.get<string>('GCP_PROJECT_ID') ?? '';
-        this.location = this.configService.get<string>('GCP_IMAGEN_LOCATION', 'global');
+        const projectId = this.configService.get<string>(AI_ENV_KEYS.projectId) ?? '';
+        this.location = this.configService.getOrThrow<string>(AI_ENV_KEYS.imageLocation);
         this.bucketName = this.configService.get<string>('GOOGLE_AI_STORAGE_BUCKET') ?? '';
-        this.MODEL_NAME = this.configService.get<string>('GCP_IMAGEN_MODEL', 'gemini-3-pro-image-preview');
+        this.MODEL_NAME = this.configService.getOrThrow<string>(AI_ENV_KEYS.imageModel);
 
         if (!projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');

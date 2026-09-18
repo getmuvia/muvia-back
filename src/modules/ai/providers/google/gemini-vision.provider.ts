@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { VertexAI, GenerativeModel } from '@google-cloud/vertexai';
+import { GoogleGenAI } from '@google/genai';
 import {
     IVisionProvider,
     RoomAnalysisResult,
@@ -8,12 +8,12 @@ import {
 } from '../../interfaces/vision-provider.interface';
 import { RetryService, ImageResolverService } from '../../core';
 import { ROOM_ANALYSIS_PROMPT } from '../../prompts';
+import { AI_ENV_KEYS } from '../../../../config/ai.config';
 
 @Injectable()
 export class GeminiVisionProvider implements IVisionProvider {
     private readonly logger = new Logger(GeminiVisionProvider.name);
-    private readonly vertexAI: VertexAI;
-    private readonly model: GenerativeModel;
+    private readonly ai: GoogleGenAI;
     private readonly MODEL_NAME: string;
 
     constructor(
@@ -21,30 +21,38 @@ export class GeminiVisionProvider implements IVisionProvider {
         private readonly retryService: RetryService,
         private readonly imageResolver: ImageResolverService,
     ) {
-        const projectId = this.configService.get<string>('GCP_PROJECT_ID');
-        const location = this.configService.get<string>('GCP_LOCATION', 'us-central1');
-        this.MODEL_NAME = this.configService.get<string>('GCP_GEMINI_MODEL', 'gemini-2.5-flash');
+        const projectId = this.configService.get<string>(AI_ENV_KEYS.projectId);
+        const location = this.configService.getOrThrow<string>(AI_ENV_KEYS.visionLocation);
+        this.MODEL_NAME = this.configService.getOrThrow<string>(AI_ENV_KEYS.visionModel);
 
         if (!projectId) {
             this.logger.error('GCP_PROJECT_ID not configured');
             throw new Error('GCP_PROJECT_ID is required for GeminiVisionProvider');
         }
 
-        this.vertexAI = new VertexAI({ project: projectId, location });
-        this.model = this.vertexAI.getGenerativeModel({ model: this.MODEL_NAME });
-        this.logger.log(`✅ GeminiVisionProvider initialized (${this.MODEL_NAME})`);
+        this.ai = new GoogleGenAI({
+            vertexai: true,
+            project: projectId,
+            location,
+        });
+        this.logger.log(`✅ GeminiVisionProvider initialized (${this.MODEL_NAME} @ ${location})`);
     }
 
     async analyzeRoom(input: ImageSourceInput): Promise<RoomAnalysisResult> {
         this.imageResolver.validateSource(input);
-        const imagePart = await this.imageResolver.toGeminiPart(input);
+        const imagePart = await this.buildImagePart(input);
         this.logger.debug(`Analyzing room via ${input.key ? 'GCS' : 'URL'}...`);
 
         try {
             const response = await this.retryService.withExponentialBackoff(
-                () => this.model.generateContent({
-                    contents: [{ role: 'user', parts: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }] }],
-                    generationConfig: ROOM_ANALYSIS_PROMPT.generationConfig,
+                () => this.ai.models.generateContent({
+                    model: this.MODEL_NAME,
+                    contents: [imagePart, { text: ROOM_ANALYSIS_PROMPT.template }],
+                    config: {
+                        temperature: ROOM_ANALYSIS_PROMPT.generationConfig.temperature,
+                        maxOutputTokens: ROOM_ANALYSIS_PROMPT.generationConfig.maxOutputTokens,
+                        responseMimeType: 'application/json',
+                    },
                 }),
                 {
                     operationName: `Gemini Vision (${this.MODEL_NAME})`,
@@ -53,14 +61,18 @@ export class GeminiVisionProvider implements IVisionProvider {
                 },
             );
 
-            const text = response.response.candidates?.[0]?.content?.parts?.[0]?.text;
-            if (!text) throw new Error('No response from Gemini Vision');
-
-            return this.parseResponse(text);
+            if (!response.text) throw new Error('No response from Gemini Vision');
+            return this.parseResponse(response.text);
         } catch (error) {
             this.logger.error(`Room analysis failed: ${error.message}`);
             throw error;
         }
+    }
+
+    private async buildImagePart(input: ImageSourceInput): Promise<any> {
+        const base64Data = await this.imageResolver.toBase64(input);
+        const mimeType = input.key ? this.imageResolver.inferMimeType(input.key) : 'image/jpeg';
+        return { inlineData: { mimeType, data: base64Data } };
     }
 
     private parseResponse(text: string): RoomAnalysisResult {

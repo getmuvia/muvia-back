@@ -79,27 +79,6 @@ export const RETRY = {
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GCP Defaults
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Google Cloud Platform default values.
- */
-export const GCP_DEFAULTS = {
-    /** Default location for Vertex AI services */
-    LOCATION: 'us-central1',
-
-    /** Default Gemini model for vision tasks */
-    GEMINI_VISION_MODEL: 'gemini-1.5-pro',
-
-    /** Default model for image generation */
-    IMAGE_GENERATION_MODEL: 'gemini-2.0-flash-exp',
-
-    /** Default embedding model */
-    EMBEDDING_MODEL: 'text-embedding-004',
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Validation
 // ─────────────────────────────────────────────────────────────────────────────
 

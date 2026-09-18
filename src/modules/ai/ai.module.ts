@@ -32,7 +32,7 @@ import { EMBEDDING_PROVIDER } from './interfaces/embedding-provider.interface';
 import { Vertex3DProvider } from './providers/google/vertex-3d.provider';
 import { Scan3dService } from './services/scan-3d/scan-3d.service';
 import { Scan3dController } from './controllers/scan-3d.controller';
-import { Gemini3VisionProvider, GeminiImageProvider, VertexEmbeddingProvider } from './providers/google';
+import { GeminiVisionProvider, GeminiImageProvider, VertexEmbeddingProvider } from './providers/google';
 import { CategoriesModule } from '../categories/categories.module';
 import { MarketsModule } from '../markets/markets.module';
 
@@ -77,7 +77,7 @@ import { MarketsModule } from '../markets/markets.module';
 
         {
             provide: VISION_PROVIDER,
-            useClass: Gemini3VisionProvider,
+            useClass: GeminiVisionProvider,
         },
         {
             provide: IMAGE_GENERATOR,
