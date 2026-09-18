@@ -47,8 +47,8 @@ GOOGLE_STORAGE_BUCKET=your-bucket-name
 GOOGLE_AI_STORAGE_BUCKET=your-private-ai-bucket-name
 
 GCP_PROJECT_ID=your-gcp-project-id
-GCP_LOCATION=us-central1
-GCP_GEMINI_MODEL=gemini-2.5-flash
+GCP_LOCATION=global
+GCP_GEMINI_MODEL=gemini-3.5-flash-lite
 
 GCP_IMAGEN_LOCATION=global
 GCP_IMAGEN_MODEL=gemini-2.5-flash-image

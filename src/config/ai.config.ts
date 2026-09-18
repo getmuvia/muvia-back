@@ -21,8 +21,8 @@ export const AI_ENV_KEYS = {
  * Model migrations are intentionally handled in their own user stories.
  */
 export const AI_DEVELOPMENT_DEFAULTS = {
-  visionLocation: 'us-central1',
-  visionModel: 'gemini-2.5-flash',
+  visionLocation: 'global',
+  visionModel: 'gemini-3.5-flash-lite',
   imageLocation: 'global',
   imageModel: 'gemini-2.5-flash-image',
   embeddingLocation: 'us-central1',

@@ -10,6 +10,11 @@ const baseEnvironment = {
 };
 
 describe('envValidationSchema AI configuration', () => {
+  it('uses the HU2 Gemini model and supported global location by default', () => {
+    expect(AI_DEVELOPMENT_DEFAULTS.visionModel).toBe('gemini-3.5-flash-lite');
+    expect(AI_DEVELOPMENT_DEFAULTS.visionLocation).toBe('global');
+  });
+
   it('applies the centralized defaults outside production', () => {
     const { error, value } = envValidationSchema.validate({
       ...baseEnvironment,
