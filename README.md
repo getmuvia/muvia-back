@@ -54,7 +54,7 @@ GCP_IMAGEN_LOCATION=global
 GCP_IMAGEN_MODEL=gemini-3.1-flash-image
 
 GCP_EMBEDDING_LOCATION=us-central1
-GCP_EMBEDDING_MODEL=text-embedding-004
+GCP_EMBEDDING_MODEL=gemini-embedding-001
 
 GCP_3D_LOCATION=us-central1
 GCP_3D_WORKER_IMAGE_URI=us-central1-docker.pkg.dev/PROJECT_ID/muvia/muvia-3d-worker:latest
@@ -107,8 +107,8 @@ explicitly; infrastructure injects those values into Cloud Run.
 - `GCP_GEMINI_MODEL`: Gemini model for vision/analysis
 - `GCP_IMAGEN_LOCATION`: location for image generation
 - `GCP_IMAGEN_MODEL`: model for generated images / virtual staging
-- `GCP_EMBEDDING_LOCATION`: embeddings location (recommended `us-central1`)
-- `GCP_EMBEDDING_MODEL`: embedding model
+- `GCP_EMBEDDING_LOCATION`: embeddings location (`us-central1` for the current provider)
+- `GCP_EMBEDDING_MODEL`: text embedding model (`gemini-embedding-001` recommended)
 
 The values in the setup example are development defaults. Do not treat them as
 production recommendations; model migrations and lifecycle changes must be

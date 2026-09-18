@@ -51,11 +51,11 @@ export class EmbeddingService {
     }
 
     /**
-     * Regenerates embeddings for all products missing one.
+     * Regenerates embeddings that are missing or use an outdated model.
      * Returns count of successful and failed operations.
      */
     async regenerateAll(): Promise<{ updated: number; failed: number }> {
-        const products = await this.productVectorRepo.findWithoutEmbedding();
+        const products = await this.productVectorRepo.findPendingEmbeddingRefresh();
         return this.processBatch(products);
     }
 

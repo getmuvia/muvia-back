@@ -7,7 +7,7 @@ import {
     EmbeddingTaskType,
 } from '../../interfaces/embedding-provider.interface';
 import { RetryService } from '../../core/retry';
-import { AI_ENV_KEYS } from '../../../../config/ai.config';
+import { AI_ENV_KEYS, AI_RUNTIME_SETTINGS } from '../../../../config/ai.config';
 
 @Injectable()
 export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit {
@@ -44,8 +44,13 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
         const cleanText = this.sanitizeText(text);
         const endpointResourceName = `projects/${this.projectId}/locations/${this.location}/publishers/google/models/${this.MODEL_NAME}`;
         const instanceValue = this.buildPredictionInstance(cleanText, taskType);
+        const parameters = helpers.toValue({
+            autoTruncate: true,
+            outputDimensionality: AI_RUNTIME_SETTINGS.embeddingDimensions,
+        });
 
         if (!instanceValue) throw new Error('Failed to convert input to Protobuf format');
+        if (!parameters) throw new Error('Failed to convert parameters to Protobuf format');
 
         try {
             const embedding = await this.retryService.withExponentialBackoff(
@@ -53,8 +58,10 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
                     const [response] = await this.client.predict({
                         endpoint: endpointResourceName,
                         instances: [instanceValue as any],
+                        parameters,
                     });
-                    return this.extractEmbeddingFromResponse(response);
+                    const values = this.extractEmbeddingFromResponse(response);
+                    return this.validateAndNormalizeEmbedding(values);
                 },
                 {
                     operationName: `Vertex AI Embeddings (${this.MODEL_NAME})`,
@@ -102,6 +109,26 @@ export class VertexEmbeddingProvider implements IEmbeddingProvider, OnModuleInit
         if (!predictionResult?.embeddings?.values) throw new Error('Invalid response structure');
 
         return predictionResult.embeddings.values as number[];
+    }
+
+    private validateAndNormalizeEmbedding(values: number[]): number[] {
+        if (
+            values.length !== AI_RUNTIME_SETTINGS.embeddingDimensions ||
+            values.some((value) => !Number.isFinite(value))
+        ) {
+            throw new Error(
+                `Invalid embedding: expected ${AI_RUNTIME_SETTINGS.embeddingDimensions} finite values`,
+            );
+        }
+
+        const magnitude = Math.sqrt(
+            values.reduce((sum, value) => sum + value * value, 0),
+        );
+        if (!Number.isFinite(magnitude) || magnitude === 0) {
+            throw new Error('Invalid embedding: zero or non-finite magnitude');
+        }
+
+        return values.map((value) => value / magnitude);
     }
 
     private ensureInitialized(): void {

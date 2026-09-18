@@ -15,8 +15,8 @@ export class EmbeddingController {
     constructor(private readonly embeddingService: EmbeddingService) { }
 
     /**
-     * Regenerates embeddings for all products without one.
-     * Use after enabling semantic search or updating product data.
+     * Regenerates embeddings that are missing or use an outdated model.
+     * Use after enabling semantic search, changing models, or updating product data.
      *
      * @returns Count of updated and failed products
      */

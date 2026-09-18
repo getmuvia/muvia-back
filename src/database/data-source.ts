@@ -14,6 +14,7 @@ import { CategoryRelation } from '../modules/categories/entities/category-relati
 import { InitialSchema1787070000000 } from './migrations/1787070000000-initial-schema';
 import { AddVirtualStagingQuota1788321600000 } from './migrations/1788321600000-add-virtual-staging-quota';
 import { AddMarketsListingsAndTaxonomy1788880000000 } from './migrations/1788880000000-add-markets-listings-and-taxonomy';
+import { AddProductEmbeddingModel1789747200000 } from './migrations/1789747200000-add-product-embedding-model';
 
 const host = process.env.DB_HOST;
 const usesCloudSqlSocket = host?.startsWith('/');
@@ -47,6 +48,7 @@ export default new DataSource({
     InitialSchema1787070000000,
     AddVirtualStagingQuota1788321600000,
     AddMarketsListingsAndTaxonomy1788880000000,
+    AddProductEmbeddingModel1789747200000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,

@@ -52,7 +52,7 @@ And returns semantically relevant products, even if they don't contain those exa
 ```
 ┌─────────────────┐    ┌───────────────────────┐    ┌─────────────────┐
 │   User Query    │───▶│VertexEmbeddingProvider│───▶│   Vertex AI     │
-│ "nordic sofa"   │    │   (NestJS Provider)   │    │ text-embedding  │
+│ "nordic sofa"   │    │   (NestJS Provider)   │    │Gemini Embedding │
 └─────────────────┘    └───────────────────────┘    └─────────────────┘
                                 │
                                 ▼
@@ -115,8 +115,12 @@ src/modules/ai/
 | Aspect | Choice | Justification |
 |--------|--------|---------------|
 | **Provider** | Google Cloud Vertex AI | Consistent with existing GCP infrastructure |
-| **Model** | `text-embedding-004` | State-of-the-art multilingual embedding model with 768 dimensions |
+| **Model** | `gemini-embedding-001` | Stable multilingual text embedding model; this backend requests 768 dimensions |
 | **SDK** | `@google-cloud/aiplatform` | Official low-level Google Cloud AI Platform SDK for Node.js |
+
+The provider requests `outputDimensionality: 768` to preserve the existing
+`vector(768)` schema and applies L2 normalization before persistence, as required
+when `gemini-embedding-001` uses a non-default dimensionality.
 
 ### Embedding Provider: VertexEmbeddingProvider
 
@@ -197,7 +201,7 @@ Encapsulates all pgvector SQL queries:
 ```typescript
 async findBySimilarity(embedding: string, limit: number, threshold: number): Promise<SearchProductResult[]>
 async updateEmbedding(productId: string, embedding: string): Promise<void>
-async findWithoutEmbedding(): Promise<Product[]>
+async findPendingEmbeddingRefresh(): Promise<Product[]>
 ```
 
 #### SearchService
@@ -255,7 +259,8 @@ Performs batch semantic search on products.
 
 ### POST `/ai/embeddings/regenerate`
 
-Regenerates embeddings for all products without one. Requires authentication.
+Regenerates embeddings that are missing or were produced by another model.
+Requires authentication.
 
 **Response:**
 ```json
@@ -277,10 +282,28 @@ GCP_PROJECT_ID=your-gcp-project-id
 
 # Embedding-specific (separate from Vision/Image Generation)
 GCP_EMBEDDING_LOCATION=us-central1
-GCP_EMBEDDING_MODEL=text-embedding-004
+GCP_EMBEDDING_MODEL=gemini-embedding-001
 ```
 
-> **Important:** Embedding models do NOT support the 'global' endpoint. Always use regional endpoints like `us-central1`.
+> **Important:** This provider uses the regional Vertex AI PredictionService endpoint.
+> Keep `GCP_EMBEDDING_LOCATION=us-central1` unless the provider implementation is
+> deliberately changed and validated for another supported location.
+
+### Model migration rollout
+
+Embedding spaces from different models are incompatible. The database stores the
+model name next to each vector, and semantic search excludes vectors that do not
+match `GCP_EMBEDDING_MODEL`.
+
+For production rollout:
+
+1. Run the database migration that adds `products.embedding_model`.
+2. Set `GCP_EMBEDDING_LOCATION=us-central1` and
+   `GCP_EMBEDDING_MODEL=gemini-embedding-001` in the production environment.
+3. Deploy the backend.
+4. Call `POST /ai/embeddings/regenerate` once to refresh missing and outdated
+   product vectors. Until regeneration finishes, products with legacy vectors are
+   safely excluded from semantic results rather than compared across model spaces.
 
 ### Authentication
 
@@ -344,7 +367,7 @@ curl -X POST http://localhost:3000/ai/search \
 
 | Model | Dimensions | Storage per product |
 |-------|------------|---------------------|
-| text-embedding-004 | 768 | ~6 KB |
+| gemini-embedding-001 (requested output) | 768 | ~6 KB |
 
 ### Indexing (Recommended for Production)
 
@@ -368,9 +391,10 @@ WITH (lists = 100);
 
 ### "404 Not Found" on embedding generation
 
-**Cause:** Using `global` endpoint for embeddings.
+**Cause:** The configured model is unavailable at the selected regional endpoint.
 
-**Fix:** Set `GCP_EMBEDDING_LOCATION=us-central1` (embedding models don't support global).
+**Fix:** Use the validated pair `GCP_EMBEDDING_LOCATION=us-central1` and
+`GCP_EMBEDDING_MODEL=gemini-embedding-001`.
 
 ### "Permission denied for Vertex AI"
 

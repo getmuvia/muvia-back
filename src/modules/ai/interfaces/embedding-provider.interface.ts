@@ -21,7 +21,7 @@ export interface EmbeddingResult {
  * swapping embedding providers without changing business logic.
  *
  * Current implementations:
- * - VertexEmbeddingProvider (Google Vertex AI text-embedding-004)
+ * - VertexEmbeddingProvider (Google Vertex AI gemini-embedding-001)
  *
  * Future implementations could include:
  * - OpenAI Embeddings
