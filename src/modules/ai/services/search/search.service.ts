@@ -12,11 +12,16 @@ import {
 } from '../../interfaces/search-result.interface';
 import { Product } from '../../../products/entities/product.entity';
 import { SEARCH } from '../../constants';
-import { evaluateProduct, SearchIntent } from './search-intent';
+import { evaluateProduct, materialRank, SearchIntent } from './search-intent';
 import type { SearchableProduct } from './search-intent';
 import { CategoryTaxonomyService } from '../../../categories/category-taxonomy.service';
 import { MarketsService } from '../../../markets/markets.service';
 import { AssetType } from '../../../products/enums/asset-type.enum';
+
+type RankedHybridProduct = {
+  result: HybridProductResult;
+  priority: number;
+};
 
 /**
  * Orchestrates semantic and hybrid search operations.
@@ -71,14 +76,15 @@ export class SearchService {
       intent,
     );
     const selected = results.slice(0, limit);
+    const suggestionLimit = Math.min(
+      Math.max(limit - selected.length, 0),
+      SEARCH.RELATED_LIMIT,
+    );
     return {
       query,
       results: selected,
       count: selected.length,
-      relatedResults: relatedResults.slice(
-        0,
-        Math.min(limit, SEARCH.RELATED_LIMIT),
-      ),
+      relatedResults: relatedResults.slice(0, suggestionLimit),
     };
   }
 
@@ -168,33 +174,40 @@ export class SearchService {
       });
     }
 
-    const results: HybridProductResult[] = [];
-    const relatedResults: HybridProductResult[] = [];
+    const results: RankedHybridProduct[] = [];
+    const relatedResults: RankedHybridProduct[] = [];
     for (const { product, result, similarity } of candidates.values()) {
       const relevance = evaluateProduct(product, intent);
+      result.score =
+        similarity === undefined
+          ? relevance.score
+          : relevance.score * (1 - SEARCH.SEMANTIC_RANK_WEIGHT) +
+            similarity * SEARCH.SEMANTIC_RANK_WEIGHT;
       if (relevance.primary) {
-        // Identity/text determines eligibility; AI contributes only to ordering.
-        result.score =
-          similarity === undefined
-            ? relevance.score
-            : relevance.score * (1 - SEARCH.SEMANTIC_RANK_WEIGHT) +
-              similarity * SEARCH.SEMANTIC_RANK_WEIGHT;
-        results.push(result);
+        // Exact material precedes mixed/partial material, then AI orders each tier.
+        results.push({
+          result,
+          priority: materialRank(relevance.materialMatch),
+        });
+      } else if (relevance.fallback) {
+        // Same product type without the requested material is an explicit fallback.
+        relatedResults.push({ result, priority: 1 });
       } else if (
         relevance.relatedType &&
         similarity !== undefined &&
         similarity >= SEARCH.RELATED_SIMILARITY_THRESHOLD
       ) {
-        relatedResults.push(result);
+        relatedResults.push({ result, priority: 0 });
       }
     }
-    const rank = (a: HybridProductResult, b: HybridProductResult) =>
-      b.score - a.score ||
-      a.title.localeCompare(b.title, 'es') ||
-      a.id.localeCompare(b.id);
+    const rank = (a: RankedHybridProduct, b: RankedHybridProduct) =>
+      b.priority - a.priority ||
+      b.result.score - a.result.score ||
+      a.result.title.localeCompare(b.result.title, 'es') ||
+      a.result.id.localeCompare(b.result.id);
     return {
-      results: results.sort(rank),
-      relatedResults: relatedResults.sort(rank),
+      results: results.sort(rank).map(({ result }) => result),
+      relatedResults: relatedResults.sort(rank).map(({ result }) => result),
     };
   }
 

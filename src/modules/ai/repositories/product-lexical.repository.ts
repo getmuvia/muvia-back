@@ -36,6 +36,7 @@ export class ProductLexicalRepository {
     const title = `(' ' || ${normalizedSearchSql('product.title')} || ' ')`;
     const keywords = `(' ' || ${normalizedSearchSql("array_to_string(product.keywords, ' ')")} || ' ')`;
     const description = `(' ' || ${normalizedSearchSql('product.description')} || ' ')`;
+    const material = `(' ' || ${normalizedSearchSql("product.specifications ->> 'material'")} || ' ')`;
     const parameters = Object.fromEntries(
       terms.map((term, i) => [
         `term${i}`,
@@ -46,14 +47,15 @@ export class ProductLexicalRepository {
     );
     const conditions = terms.map(
       (_, i) =>
-        `(${title} LIKE :term${i} OR ${keywords} LIKE :term${i} OR ${description} LIKE :term${i})`,
+        `(${title} LIKE :term${i} OR ${keywords} LIKE :term${i} OR ${description} LIKE :term${i} OR ${material} LIKE :term${i})`,
     );
     const rank = terms
       .map((term, i) => {
         const typeWeight = intent.aliases.includes(term) ? 10 : 1;
         return `(CASE WHEN ${title} LIKE :term${i} THEN ${typeWeight * 3} ELSE 0 END
         + CASE WHEN ${keywords} LIKE :term${i} THEN ${typeWeight * 2} ELSE 0 END
-        + CASE WHEN ${description} LIKE :term${i} THEN 1 ELSE 0 END)`;
+        + CASE WHEN ${description} LIKE :term${i} THEN 1 ELSE 0 END
+        + CASE WHEN ${material} LIKE :term${i} THEN 2 ELSE 0 END)`;
       })
       .join(' + ');
 

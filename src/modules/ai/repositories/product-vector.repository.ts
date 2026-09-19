@@ -110,6 +110,7 @@ export class ProductVectorRepository {
                 p.title,
                 p.description,
                 p.keywords,
+                p.specifications,
                 listing.price,
                 listing.stock,
                 listing.currency_code as "currencyCode",

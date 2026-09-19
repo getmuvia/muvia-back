@@ -3,6 +3,11 @@ import {
   normalizeSearchText,
 } from '../../../../common/search/search-text';
 import type { ProductMeasurementFilter } from '../../../../common/search/product-measurement';
+import {
+  classifyMaterialMatch,
+  MaterialMatchLevel,
+  MaterialSearchIntent,
+} from '../../../../common/search/product-material';
 
 export interface SearchIntent {
   text: string;
@@ -14,6 +19,7 @@ export interface SearchIntent {
   articles: readonly string[];
   identityPrefixes: readonly string[];
   measurement?: ProductMeasurementFilter;
+  material?: MaterialSearchIntent;
 }
 
 export interface SearchableProduct {
@@ -21,6 +27,7 @@ export interface SearchableProduct {
   description?: string | null;
   keywords?: string[];
   categoryCode?: string | null;
+  specifications?: { material?: string } | null;
 }
 
 function namedCategory(text: string, intent: SearchIntent): string | undefined {
@@ -34,7 +41,10 @@ export function evaluateProduct(
   intent: SearchIntent,
 ) {
   const title = normalizeSearchText(product.title);
-  const keywords = normalizeSearchText((product.keywords ?? []).join(' '));
+  const structuredMaterial = product.specifications?.material ?? '';
+  const keywords = normalizeSearchText(
+    [...(product.keywords ?? []), structuredMaterial].join(' '),
+  );
   const description = normalizeSearchText(product.description ?? '');
   const matches = (text: string, term: string) =>
     containsSearchPhrase(text, term) ||
@@ -70,17 +80,28 @@ export function evaluateProduct(
       )
     );
   });
-  const primary = intent.categoryCode
+  const identityMatches = intent.categoryCode
     ? categoryInIdentity || categoryInDescription
     : intent.terms.length === 0
       ? intent.measurement !== undefined
       : titleCoverage >= 0.5 ||
         keywordCoverage >= 0.5 ||
         descriptionCoverage === 1;
+  const materialMatch = classifyMaterialMatch(
+    structuredMaterial,
+    `${title} ${keywords} ${description}`,
+    intent.material,
+  );
+  const primary =
+    identityMatches && (!intent.material || materialMatch !== 'none');
+  const fallback = Boolean(
+    identityMatches && intent.material && materialMatch === 'none',
+  );
   const relatedType =
-    !intent.categoryCode ||
-    (identityCategory !== undefined &&
-      intent.relatedCategoryCodes.includes(identityCategory));
+    !fallback &&
+    (!intent.categoryCode ||
+      (identityCategory !== undefined &&
+        intent.relatedCategoryCodes.includes(identityCategory)));
 
   let score =
     titleCoverage * 0.65 + keywordCoverage * 0.2 + descriptionCoverage * 0.15;
@@ -93,5 +114,17 @@ export function evaluateProduct(
   if (containsSearchPhrase(description, intent.text)) score += 0.1;
   if (title === intent.text && intent.text) score = 1;
 
-  return { primary, relatedType, score: Math.min(score, 1) };
+  return {
+    primary,
+    fallback,
+    relatedType,
+    materialMatch,
+    score: Math.min(score, 1),
+  };
+}
+
+export function materialRank(level: MaterialMatchLevel): number {
+  if (level === 'full') return 2;
+  if (level === 'partial') return 1;
+  return 0;
 }
