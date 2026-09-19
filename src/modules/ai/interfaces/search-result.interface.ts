@@ -32,6 +32,9 @@ export interface SearchProductResult {
     /** Stable category identity used for relevance filtering */
     categoryCode: string | null;
 
+    /** Structured attributes used for deterministic material ranking. */
+    specifications: { material?: string } | null;
+
     /** Currency for the selected market listing */
     currencyCode: string;
 
@@ -107,6 +110,6 @@ export interface HybridSearchResponse {
     /** Number of main results returned (excludes related suggestions). */
     count: number;
 
-    /** Broader suggestions, never mixed into main results. */
+    /** Material fallbacks and broader suggestions, never mixed into main results. */
     relatedResults: HybridProductResult[];
 }

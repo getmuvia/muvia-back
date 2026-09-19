@@ -30,6 +30,12 @@ navigation search modal use the same response contract.
   embeddings are available. Text-only candidates keep their lexical score. Text
   coverage weights are title 65%, keywords 20%, description 15%, with phrase and
   completeness bonuses capped at 1. Similarity is a ranking score, not a probability.
+- When a query names a supported material, products made from that material rank
+  first, products combining it with other materials rank second, and same-type
+  products without it become fallback suggestions. Structured `specifications.material`
+  participates in retrieval and ranking instead of relying only on descriptions.
+- Fallback suggestions are returned only when direct matches do not fill the requested
+  limit. They remain separate from the main results so clients can label them honestly.
 - Related suggestions need similarity >= 0.45 and, for a recognized type, an explicitly
   compatible type. Sofas can suggest armchairs/divans, but not office chairs. Suggestions
   never duplicate main results and are capped at six (or the requested limit if smaller).
@@ -71,7 +77,8 @@ The service retrieves up to three times the requested limit per retrieval method
 
 ## Frontend and rollout
 
-The catalog renders main matches first and relatedResults under Productos relacionados.
+The catalog renders main matches first and `relatedResults` under
+Otros productos que te podrían interesar.
 When only suggestions exist, it explicitly says there are no direct matches. The modal
 uses the same grouping and keeps keyboard navigation across both groups. Both groups
 are cleared when a new query starts, the query is cleared or an error occurs.
@@ -90,6 +97,8 @@ for its text filter. POST /ai/search remains a semantic batch endpoint.
 - Silla ergonómica with oficina/silla tags: excluded from both groups for sofa.
 - Cojín para sofá / Mesa junto al sofá: excluded from sofa main results.
 - sofa comodo para una sala pequena: type stays sofa; AI helps order eligible sofas.
+- quiero una silla de madera: wooden chairs first, mixed/partial wooden chairs next,
+  and other chairs only as separately labeled fallback suggestions.
 - Product without an embedding: still eligible through normalized text/keywords.
 - Empty results, AI outage, request errors, rapid query changes and clearing the search:
   preserve group boundaries and show an honest empty/error state.

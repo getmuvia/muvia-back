@@ -8,6 +8,7 @@ import {
 import { getSearchLocale } from '../../common/search/locales';
 import type { SearchIntent } from '../ai/services/search/search-intent';
 import { parseProductMeasurementSearch } from '../../common/search/product-measurement';
+import { detectMaterialSearchIntent } from '../../common/search/product-material';
 import { CategoryAlias } from './entities/category-alias.entity';
 import { CategoryRelation } from './entities/category-relation.entity';
 
@@ -69,6 +70,7 @@ export class CategoryTaxonomyService {
       articles: languageData.articles,
       identityPrefixes: languageData.identityPrefixes,
       measurement: parsedSearch.measurement,
+      material: detectMaterialSearchIntent(parsedSearch.query),
     };
   }
 
