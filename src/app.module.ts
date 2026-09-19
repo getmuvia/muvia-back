@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -15,6 +15,8 @@ import { CommonModule } from './common/common.module';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { AiModule } from './modules/ai/ai.module';
 import { MarketsModule } from './modules/markets/markets.module';
+import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
+import { TelemetryModule } from './modules/telemetry/telemetry.module';
 
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { MarketsModule } from './modules/markets/markets.module';
     FilesModule,
     AiModule,
     MarketsModule,
+    TelemetryModule,
   ],
   controllers: [AppController],
   providers: [
@@ -45,5 +48,9 @@ import { MarketsModule } from './modules/markets/markets.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(CorrelationIdMiddleware).forRoutes('*');
+  }
+}
 

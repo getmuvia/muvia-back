@@ -15,6 +15,8 @@ async function bootstrap() {
   app.enableCors({
     origin: allowedOrigins.length > 0 ? allowedOrigins : true,
     credentials: true,
+    exposedHeaders: ['X-Correlation-ID'],
+    maxAge: 600,
   });
 
   app.useGlobalPipes(
