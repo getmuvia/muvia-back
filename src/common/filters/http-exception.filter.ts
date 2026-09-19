@@ -7,6 +7,8 @@ import {
     Logger,
 } from '@nestjs/common';
 import { Request, Response } from 'express';
+import { randomUUID } from 'node:crypto';
+import { CORRELATION_ID_HEADER, isCorrelationId } from '../middleware/correlation-id.middleware';
 
 interface ErrorResponse {
     statusCode: number;
@@ -14,6 +16,7 @@ interface ErrorResponse {
     error: string;
     timestamp: string;
     path: string;
+    correlationId: string;
 }
 
 @Catch()
@@ -26,17 +29,23 @@ export class HttpExceptionFilter implements ExceptionFilter {
         const request = ctx.getRequest<Request>();
 
         const { status, message, error } = this.extractErrorDetails(exception);
+        const suppliedCorrelationId = request.header(CORRELATION_ID_HEADER);
+        const correlationId = isCorrelationId(suppliedCorrelationId)
+            ? suppliedCorrelationId
+            : randomUUID();
 
         const errorResponse: ErrorResponse = {
             statusCode: status,
             message,
             error,
             timestamp: new Date().toISOString(),
-            path: request.url,
+            path: request.path || request.url.split('?', 1)[0],
+            correlationId,
         };
 
         this.logError(exception, errorResponse);
 
+        response.setHeader(CORRELATION_ID_HEADER, correlationId);
         response.status(status).json(errorResponse);
     }
 
