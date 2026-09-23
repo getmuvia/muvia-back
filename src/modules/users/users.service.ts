@@ -18,6 +18,10 @@ import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.in
 import { VendorLocation } from './entities/vendor-location.entity';
 import { MarketsService } from '../markets/markets.service';
 import { VendorLocationDto } from './dto/create-vendor-profile.dto';
+import {
+  createErrorPayload,
+  ERROR_CODES,
+} from '../../common/errors/error-code';
 
 @Injectable()
 export class UsersService {
@@ -30,13 +34,15 @@ export class UsersService {
     private readonly vendorLocationRepository: Repository<VendorLocation>,
     private readonly passwordService: PasswordService,
     private readonly marketsService: MarketsService,
-  ) { }
+  ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
     await this.validateEmailNotExists(createUserDto.email);
     this.validateVendorProfile(createUserDto);
 
-    const passwordHash = await this.passwordService.hash(createUserDto.password);
+    const passwordHash = await this.passwordService.hash(
+      createUserDto.password,
+    );
 
     const user = this.userRepository.create({
       email: createUserDto.email,
@@ -55,17 +61,23 @@ export class UsersService {
 
   async createVendor(createUserDto: CreateUserDto): Promise<User> {
     if (createUserDto.role !== UserRole.VENDOR) {
-      throw new BadRequestException('Role must be vendor to create a vendor account');
+      throw new BadRequestException(
+        'Role must be vendor to create a vendor account',
+      );
     }
 
     if (!createUserDto.vendorProfile) {
-      throw new BadRequestException('Vendor profile is required for vendor accounts');
+      throw new BadRequestException(
+        'Vendor profile is required for vendor accounts',
+      );
     }
 
     return this.create(createUserDto);
   }
 
-  async createConsumer(createUserDto: Omit<CreateUserDto, 'vendorProfile'>): Promise<User> {
+  async createConsumer(
+    createUserDto: Omit<CreateUserDto, 'vendorProfile'>,
+  ): Promise<User> {
     return this.create({
       ...createUserDto,
       role: UserRole.CONSUMER,
@@ -139,7 +151,9 @@ export class UsersService {
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
     if (Object.keys(updateUserDto).length === 0) {
-      throw new BadRequestException('At least one field must be provided for update');
+      throw new BadRequestException(
+        'At least one field must be provided for update',
+      );
     }
 
     const user = await this.findOne(id);
@@ -150,7 +164,10 @@ export class UsersService {
     if (vendorProfile && this.isVendor(user.role)) {
       const { location, ...profileData } = vendorProfile;
       if (!user.vendorProfile) {
-        user.vendorProfile = this.vendorProfileRepository.create({ userId: user.id, ...profileData });
+        user.vendorProfile = this.vendorProfileRepository.create({
+          userId: user.id,
+          ...profileData,
+        });
       } else {
         this.vendorProfileRepository.merge(user.vendorProfile, profileData);
       }
@@ -163,7 +180,10 @@ export class UsersService {
     return this.findOne(id);
   }
 
-  async changePassword(id: string, changePasswordDto: ChangePasswordDto): Promise<void> {
+  async changePassword(
+    id: string,
+    changePasswordDto: ChangePasswordDto,
+  ): Promise<void> {
     const user = await this.userRepository.findOne({
       where: { id },
       select: ['id', 'passwordHash'], // Explicitly select passwordHash
@@ -179,10 +199,17 @@ export class UsersService {
     );
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid current password');
+      throw new UnauthorizedException(
+        createErrorPayload(
+          ERROR_CODES.INVALID_CURRENT_PASSWORD,
+          'Invalid current password',
+        ),
+      );
     }
 
-    user.passwordHash = await this.passwordService.hash(changePasswordDto.newPassword);
+    user.passwordHash = await this.passwordService.hash(
+      changePasswordDto.newPassword,
+    );
     await this.userRepository.save(user);
   }
 
@@ -192,15 +219,24 @@ export class UsersService {
   }
 
   private async validateEmailNotExists(email: string): Promise<void> {
-    const existingUser = await this.userRepository.findOne({ where: { email } });
+    const existingUser = await this.userRepository.findOne({
+      where: { email },
+    });
     if (existingUser) {
-      throw new ConflictException('Email has already been registered');
+      throw new ConflictException(
+        createErrorPayload(
+          ERROR_CODES.EMAIL_ALREADY_REGISTERED,
+          'Email has already been registered',
+        ),
+      );
     }
   }
 
   private validateVendorProfile(dto: CreateUserDto): void {
     if (this.isVendor(dto.role) && !dto.vendorProfile) {
-      throw new BadRequestException('Vendor profile is required for vendor accounts');
+      throw new BadRequestException(
+        'Vendor profile is required for vendor accounts',
+      );
     }
   }
 
@@ -227,9 +263,14 @@ export class UsersService {
     location?: VendorLocationDto,
   ): Promise<void> {
     const activeMarkets = await this.marketsService.findActive();
-    const defaultMarket = activeMarkets.find(market => market.isDefault) ?? activeMarkets[0];
-    const countryCode = location?.countryCode?.toUpperCase() ?? defaultMarket?.code;
-    if (!countryCode) throw new BadRequestException('No active market is available for the vendor location');
+    const defaultMarket =
+      activeMarkets.find((market) => market.isDefault) ?? activeMarkets[0];
+    const countryCode =
+      location?.countryCode?.toUpperCase() ?? defaultMarket?.code;
+    if (!countryCode)
+      throw new BadRequestException(
+        'No active market is available for the vendor location',
+      );
     await this.marketsService.requireActive(countryCode);
 
     const existing = await this.vendorLocationRepository.findOne({
@@ -247,10 +288,11 @@ export class UsersService {
       await this.vendorLocationRepository.save(existing);
       return;
     }
-    await this.vendorLocationRepository.save(this.vendorLocationRepository.create({
-      ...values,
-      vendorProfileId: profile.id,
-    }));
+    await this.vendorLocationRepository.save(
+      this.vendorLocationRepository.create({
+        ...values,
+        vendorProfileId: profile.id,
+      }),
+    );
   }
-
 }

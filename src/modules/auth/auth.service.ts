@@ -7,6 +7,10 @@ import { RegisterDto } from './dto/register.dto';
 import { AuthResponse } from './responses/auth.response';
 import { TokenService } from './services/token.service';
 import { AuthMapper } from './mappers/auth.mapper';
+import {
+  createErrorPayload,
+  ERROR_CODES,
+} from '../../common/errors/error-code';
 
 const DUMMY_PASSWORD_HASH =
   '$2b$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy';
@@ -29,22 +33,43 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto): Promise<AuthResponse> {
-    const user = await this.validateCredentials(loginDto.email, loginDto.password);
+    const user = await this.validateCredentials(
+      loginDto.email,
+      loginDto.password,
+    );
     return this.createAuthResponse(user);
   }
 
-  private async validateCredentials(email: string, password: string): Promise<User> {
-    const user = await this.usersService.findOneByEmail(this.normalizeEmail(email));
+  private async validateCredentials(
+    email: string,
+    password: string,
+  ): Promise<User> {
+    const user = await this.usersService.findOneByEmail(
+      this.normalizeEmail(email),
+    );
 
     if (!user) {
       await this.passwordService.compare(password, DUMMY_PASSWORD_HASH);
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(
+        createErrorPayload(
+          ERROR_CODES.INVALID_CREDENTIALS,
+          'Invalid credentials',
+        ),
+      );
     }
 
-    const isPasswordValid = await this.passwordService.compare(password, user.passwordHash);
+    const isPasswordValid = await this.passwordService.compare(
+      password,
+      user.passwordHash,
+    );
 
     if (!isPasswordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException(
+        createErrorPayload(
+          ERROR_CODES.INVALID_CREDENTIALS,
+          'Invalid credentials',
+        ),
+      );
     }
 
     return user;
@@ -52,7 +77,8 @@ export class AuthService {
 
   private async createAuthResponse(user: User): Promise<AuthResponse> {
     const authenticatedUser = AuthMapper.toAuthenticatedUser(user);
-    const accessToken = await this.tokenService.generateAccessToken(authenticatedUser);
+    const accessToken =
+      await this.tokenService.generateAccessToken(authenticatedUser);
 
     return AuthMapper.toAuthResponse(accessToken, authenticatedUser);
   }

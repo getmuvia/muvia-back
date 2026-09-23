@@ -1,3 +1,4 @@
+import { NotFoundException } from '@nestjs/common';
 import { EntityManager, Repository } from 'typeorm';
 import { EmbeddingService } from '../ai/services/embedding/embedding.service';
 import { Category } from '../categories/entities/category.entity';
@@ -174,6 +175,20 @@ describe('ProductsService transactional writes', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(productRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(assetRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
+    expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
+  });
+
+  it('exposes a stable code when the requested product does not exist', async () => {
+    productRepositoryInTransaction.findOne.mockResolvedValue(null);
+
+    const error = await service
+      .update(productId, sellerId, { title: 'Updated desk' })
+      .catch((caughtError: unknown) => caughtError);
+
+    expect(error).toBeInstanceOf(NotFoundException);
+    expect((error as NotFoundException).getResponse()).toMatchObject({
+      code: 'PRODUCT_NOT_FOUND',
+    });
     expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
   });
 
