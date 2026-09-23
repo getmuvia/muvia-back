@@ -56,7 +56,9 @@ describe('HttpExceptionFilter', () => {
   });
 
   it('preserves a known application error code in the HTTP response', () => {
-    jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    const loggerWarn = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation();
     const response = {
       setHeader: jest.fn(),
       status: jest.fn().mockReturnThis(),
@@ -90,5 +92,6 @@ describe('HttpExceptionFilter', () => {
         message: 'Email has already been registered',
       }),
     );
+    expect(loggerWarn).not.toHaveBeenCalled();
   });
 });

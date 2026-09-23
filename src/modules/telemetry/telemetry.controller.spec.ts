@@ -1,15 +1,18 @@
 import { Test } from '@nestjs/testing';
 import { FrontendErrorEventDto } from './dto/frontend-error-event.dto';
 import { TelemetryController } from './telemetry.controller';
+import { TelemetryModule } from './telemetry.module';
 import { TelemetryService } from './telemetry.service';
 
 describe('TelemetryController', () => {
   it('accepts a bounded frontend event and keeps its incident ID', async () => {
     const capture = jest.fn();
     const module = await Test.createTestingModule({
-      controllers: [TelemetryController],
-      providers: [{ provide: TelemetryService, useValue: { capture } }],
-    }).compile();
+      imports: [TelemetryModule],
+    })
+      .overrideProvider(TelemetryService)
+      .useValue({ capture })
+      .compile();
     const controller = module.get(TelemetryController);
     const event = createEvent();
 

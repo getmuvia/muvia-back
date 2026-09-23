@@ -8,7 +8,9 @@ describe('TelemetryService', () => {
   });
 
   it('re-sanitizes sensitive values before writing structured logs', () => {
-    const loggerError = jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation();
     const service = new TelemetryService();
     const event = createEvent();
     event.message = [
@@ -20,14 +22,17 @@ describe('TelemetryService', () => {
     service.capture(event);
 
     expect(loggerError).toHaveBeenCalledTimes(1);
-    const record = String(loggerError.mock.calls[0][0]);
-    expect(record).toContain('[redacted-email]');
-    expect(record).toContain('Bearer [redacted]');
-    expect(record).not.toContain('seller@example.com');
-    expect(record).not.toContain('private-token');
-    expect(record).not.toContain('c2VjcmV0');
-    expect(record).not.toContain('access_token');
-    expect(record).toContain('https://api.example.com/products');
+    const record = loggerError.mock.calls[0][0] as Record<string, unknown>;
+    const serializedRecord = JSON.stringify(record);
+    expect(record.event).toBe('frontend_error');
+    expect(record.incidentId).toBe(event.incidentId);
+    expect(serializedRecord).toContain('[redacted-email]');
+    expect(serializedRecord).toContain('Bearer [redacted]');
+    expect(serializedRecord).not.toContain('seller@example.com');
+    expect(serializedRecord).not.toContain('private-token');
+    expect(serializedRecord).not.toContain('c2VjcmV0');
+    expect(serializedRecord).not.toContain('access_token');
+    expect(serializedRecord).toContain('https://api.example.com/products');
   });
 });
 
