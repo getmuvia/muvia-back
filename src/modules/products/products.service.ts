@@ -33,6 +33,10 @@ import {
   parseProductMeasurementSearch,
   productDimensionCmSql,
 } from '../../common/search/product-measurement';
+import {
+  createErrorPayload,
+  ERROR_CODES,
+} from '../../common/errors/error-code';
 
 @Injectable()
 export class ProductsService {
@@ -185,7 +189,10 @@ export class ProductsService {
 
           if (!listingUpdate.affected) {
             throw new NotFoundException(
-              `Product listing for product ${id} not found`,
+              createErrorPayload(
+                ERROR_CODES.PRODUCT_LISTING_NOT_FOUND,
+                `Product listing for product ${id} not found`,
+              ),
             );
           }
         }
@@ -218,7 +225,10 @@ export class ProductsService {
 
     if (incomingIds.some((id) => !existingIds.includes(id))) {
       throw new BadRequestException(
-        'One or more product assets do not belong to this product',
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_ASSET_MISMATCH,
+          'One or more product assets do not belong to this product',
+        ),
       );
     }
 
@@ -244,7 +254,10 @@ export class ProductsService {
 
         if (!assetUpdate.affected) {
           throw new NotFoundException(
-            `Product asset with ID ${assetDto.id} not found`,
+            createErrorPayload(
+              ERROR_CODES.PRODUCT_ASSET_NOT_FOUND,
+              `Product asset with ID ${assetDto.id} not found`,
+            ),
           );
         }
       } else {
@@ -289,7 +302,12 @@ export class ProductsService {
     });
 
     if (!asset) {
-      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+      throw new NotFoundException(
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_ASSET_NOT_FOUND,
+          `Asset with ID ${assetId} not found`,
+        ),
+      );
     }
 
     await this.assetRepository.remove(asset);
@@ -309,7 +327,12 @@ export class ProductsService {
     });
 
     if (!asset) {
-      throw new NotFoundException(`Asset with ID ${assetId} not found`);
+      throw new NotFoundException(
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_ASSET_NOT_FOUND,
+          `Asset with ID ${assetId} not found`,
+        ),
+      );
     }
 
     Object.assign(asset, dto);
@@ -332,7 +355,12 @@ export class ProductsService {
         productId,
       });
       if (!assetExists) {
-        throw new NotFoundException(`Asset with ID ${assetId} not found`);
+        throw new NotFoundException(
+          createErrorPayload(
+            ERROR_CODES.PRODUCT_ASSET_NOT_FOUND,
+            `Asset with ID ${assetId} not found`,
+          ),
+        );
       }
 
       await assetRepository.update({ productId }, { isPrimary: false });
@@ -396,7 +424,10 @@ export class ProductsService {
   private validateOwnership(product: Product, sellerId: string): void {
     if (product.sellerId !== sellerId) {
       throw new ForbiddenException(
-        'You do not have permission to modify this product',
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_FORBIDDEN,
+          'You do not have permission to modify this product',
+        ),
       );
     }
   }
@@ -499,11 +530,20 @@ export class ProductsService {
     const category = await categoryRepository.findOne({
       where: { id: categoryId },
     });
-    if (!category)
-      throw new NotFoundException(`Category with ID ${categoryId} not found`);
+    if (!category) {
+      throw new NotFoundException(
+        createErrorPayload(
+          ERROR_CODES.CATEGORY_NOT_FOUND,
+          `Category with ID ${categoryId} not found`,
+        ),
+      );
+    }
     if (!category.isSelectable) {
       throw new BadRequestException(
-        'Products must use a specific selectable category',
+        createErrorPayload(
+          ERROR_CODES.CATEGORY_NOT_SELECTABLE,
+          'Products must use a specific selectable category',
+        ),
       );
     }
   }
@@ -521,7 +561,10 @@ export class ProductsService {
     });
     if (!location) {
       throw new BadRequestException(
-        'Complete the vendor business location before creating products',
+        createErrorPayload(
+          ERROR_CODES.VENDOR_LOCATION_REQUIRED,
+          'Complete the vendor business location before creating products',
+        ),
       );
     }
 
@@ -533,7 +576,10 @@ export class ProductsService {
     });
     if (!market) {
       throw new NotFoundException(
-        `Market ${location.countryCode} is not available`,
+        createErrorPayload(
+          ERROR_CODES.MARKET_NOT_AVAILABLE,
+          `Market ${location.countryCode} is not available`,
+        ),
       );
     }
 
@@ -557,7 +603,12 @@ export class ProductsService {
   ): Promise<Product> {
     const product = await productRepository.findOne({ where: { id } });
     if (!product) {
-      throw new NotFoundException(`Product with ID ${id} not found`);
+      throw new NotFoundException(
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_NOT_FOUND,
+          `Product with ID ${id} not found`,
+        ),
+      );
     }
     return product;
   }
@@ -579,7 +630,12 @@ export class ProductsService {
     });
 
     if (!product) {
-      throw new NotFoundException(`Product with ID ${id} not found`);
+      throw new NotFoundException(
+        createErrorPayload(
+          ERROR_CODES.PRODUCT_NOT_FOUND,
+          `Product with ID ${id} not found`,
+        ),
+      );
     }
 
     return product;
