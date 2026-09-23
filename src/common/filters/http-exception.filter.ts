@@ -100,8 +100,12 @@ export class HttpExceptionFilter implements ExceptionFilter {
         `${errorResponse.path} - ${errorMessage}`,
         exception instanceof Error ? exception.stack : undefined,
       );
-    } else {
-      this.logger.warn(`${errorResponse.path} - ${errorMessage}`);
+      return;
     }
+
+    // Expected business outcomes and rate-limit rejections are not incidents.
+    if (errorResponse.code || errorResponse.statusCode === 429) return;
+
+    this.logger.warn(`${errorResponse.path} - ${errorMessage}`);
   }
 }
