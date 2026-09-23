@@ -3,9 +3,10 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In, SelectQueryBuilder } from 'typeorm';
+import { EntityManager, Repository, In, SelectQueryBuilder } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
@@ -25,6 +26,7 @@ import { ProductListing } from './entities/product-listing.entity';
 import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { Category } from '../categories/entities/category.entity';
 import { MarketsService } from '../markets/markets.service';
+import { Market } from '../markets/entities/market.entity';
 import {
   ProductDimension,
   VALID_PRODUCT_DIMENSION_PATTERN,
@@ -34,47 +36,49 @@ import {
 
 @Injectable()
 export class ProductsService {
+  private readonly logger = new Logger(ProductsService.name);
+
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
     @InjectRepository(ProductAsset)
     private readonly assetRepository: Repository<ProductAsset>,
-    @InjectRepository(ProductListing)
-    private readonly listingRepository: Repository<ProductListing>,
-    @InjectRepository(VendorLocation)
-    private readonly vendorLocationRepository: Repository<VendorLocation>,
-    @InjectRepository(Category)
-    private readonly categoryRepository: Repository<Category>,
     private readonly embeddingService: EmbeddingService,
     private readonly marketsService: MarketsService,
   ) {}
 
   async create(sellerId: string, dto: CreateProductDto): Promise<Product> {
     const { assets, ...productData } = dto;
-    await this.validateSelectableCategory(productData.categoryId);
 
-    const product = this.productRepository.create({ ...productData, sellerId });
-    const savedProduct = await this.productRepository.save(product);
-    try {
-      await this.createDefaultListing(savedProduct, sellerId);
-    } catch (error) {
-      await this.productRepository.remove(savedProduct);
-      throw error;
-    }
+    const savedProduct = await this.productRepository.manager.transaction(
+      async (manager) => {
+        const productRepository = manager.getRepository(Product);
+        const assetRepository = manager.getRepository(ProductAsset);
+        const categoryRepository = manager.getRepository(Category);
 
-    try {
-      console.log(`🧠 Generating embedding for product ${savedProduct.id}...`);
-      await this.triggerEmbeddingGeneration(savedProduct.id);
-      console.log(`✅ Embedding generated successfully.`);
-    } catch (error) {
-      console.error(`❌ AI failed, but the product was saved:`, error);
-    }
+        await this.validateSelectableCategory(
+          productData.categoryId,
+          categoryRepository,
+        );
 
-    if (assets?.length) {
-      await this.createAssets(savedProduct.id, assets);
-    }
+        const product = productRepository.create({
+          ...productData,
+          sellerId,
+        });
+        const saved = await productRepository.save(product);
 
-    return this.findOne(savedProduct.id);
+        await this.createDefaultListing(saved, sellerId, manager);
+
+        if (assets?.length) {
+          await this.createAssets(saved.id, assets, assetRepository);
+        }
+
+        return this.findOneWithRepository(saved.id, productRepository);
+      },
+    );
+
+    this.scheduleEmbeddingGeneration(savedProduct.id);
+    return savedProduct;
   }
 
   async findAll(filterDto: ProductFilterDto): Promise<{
@@ -112,23 +116,7 @@ export class ProductsService {
   }
 
   async findOne(id: string): Promise<Product> {
-    const product = await this.productRepository.findOne({
-      where: { id },
-      relations: [
-        'assets',
-        'category',
-        'seller',
-        'listings',
-        'listings.market',
-        'listings.vendorLocation',
-      ],
-    });
-
-    if (!product) {
-      throw new NotFoundException(`Product with ID ${id} not found`);
-    }
-
-    return product;
+    return this.findOneWithRepository(id, this.productRepository);
   }
 
   async findBySeller(sellerId: string): Promise<Product[]> {
@@ -167,54 +155,82 @@ export class ProductsService {
     sellerId: string,
     dto: UpdateProductDto,
   ): Promise<Product> {
-    const product = await this.findOne(id);
-    this.validateOwnership(product, sellerId);
-
     const { assets, ...productData } = dto;
-    await this.validateSelectableCategory(productData.categoryId);
 
-    Object.assign(product, productData);
-    await this.productRepository.save(product);
-    if (dto.price !== undefined || dto.stock !== undefined) {
-      await this.listingRepository.update(
-        { productId: id },
-        {
-          ...(dto.price !== undefined ? { price: dto.price } : {}),
-          ...(dto.stock !== undefined ? { stock: dto.stock } : {}),
-        },
-      );
-    }
+    const updatedProduct = await this.productRepository.manager.transaction(
+      async (manager) => {
+        const productRepository = manager.getRepository(Product);
+        const listingRepository = manager.getRepository(ProductListing);
+        const assetRepository = manager.getRepository(ProductAsset);
+        const categoryRepository = manager.getRepository(Category);
 
-    if (assets !== undefined) {
-      await this.syncAssets(id, assets);
-    }
+        const product = await this.requireProduct(id, productRepository);
+        this.validateOwnership(product, sellerId);
+        await this.validateSelectableCategory(
+          productData.categoryId,
+          categoryRepository,
+        );
+
+        Object.assign(product, productData);
+        await productRepository.save(product);
+
+        if (dto.price !== undefined || dto.stock !== undefined) {
+          const listingUpdate = await listingRepository.update(
+            { productId: id },
+            {
+              ...(dto.price !== undefined ? { price: dto.price } : {}),
+              ...(dto.stock !== undefined ? { stock: dto.stock } : {}),
+            },
+          );
+
+          if (!listingUpdate.affected) {
+            throw new NotFoundException(
+              `Product listing for product ${id} not found`,
+            );
+          }
+        }
+
+        if (assets !== undefined) {
+          await this.syncAssets(id, assets, assetRepository);
+        }
+
+        return this.findOneWithRepository(id, productRepository);
+      },
+    );
 
     if (this.shouldRegenerateEmbedding(dto)) {
-      void this.triggerEmbeddingGeneration(id);
+      this.scheduleEmbeddingGeneration(id);
     }
 
-    return this.findOne(id);
+    return updatedProduct;
   }
 
   private async syncAssets(
     productId: string,
     assets: SyncProductAssetDto[],
+    assetRepository: Repository<ProductAsset>,
   ): Promise<void> {
-    const existingAssets = await this.assetRepository.find({
+    const existingAssets = await assetRepository.find({
       where: { productId },
     });
     const existingIds = existingAssets.map((a) => a.id);
-    const incomingIds = assets.filter((a) => a.id).map((a) => a.id);
+    const incomingIds = assets.flatMap((asset) => (asset.id ? [asset.id] : []));
+
+    if (incomingIds.some((id) => !existingIds.includes(id))) {
+      throw new BadRequestException(
+        'One or more product assets do not belong to this product',
+      );
+    }
 
     const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
     if (idsToDelete.length > 0) {
-      await this.assetRepository.delete({ id: In(idsToDelete), productId });
+      await assetRepository.delete({ id: In(idsToDelete), productId });
     }
 
     for (let i = 0; i < assets.length; i++) {
       const assetDto = assets[i];
       if (assetDto.id) {
-        await this.assetRepository.update(
+        const assetUpdate = await assetRepository.update(
           { id: assetDto.id, productId },
           {
             url: assetDto.url,
@@ -225,13 +241,19 @@ export class ProductsService {
               | undefined,
           },
         );
+
+        if (!assetUpdate.affected) {
+          throw new NotFoundException(
+            `Product asset with ID ${assetDto.id} not found`,
+          );
+        }
       } else {
-        const newAsset = this.assetRepository.create({
+        const newAsset = assetRepository.create({
           ...assetDto,
           productId,
           isPrimary: i === 0 ? true : (assetDto.isPrimary ?? false),
         });
-        await this.assetRepository.save(newAsset);
+        await assetRepository.save(newAsset);
       }
     }
   }
@@ -299,25 +321,41 @@ export class ProductsService {
     assetId: string,
     sellerId: string,
   ): Promise<void> {
-    const product = await this.findOne(productId);
-    this.validateOwnership(product, sellerId);
+    await this.productRepository.manager.transaction(async (manager) => {
+      const productRepository = manager.getRepository(Product);
+      const assetRepository = manager.getRepository(ProductAsset);
+      const product = await this.requireProduct(productId, productRepository);
+      this.validateOwnership(product, sellerId);
 
-    await this.assetRepository.update({ productId }, { isPrimary: false });
-    await this.assetRepository.update(
-      { id: assetId, productId },
-      { isPrimary: true },
-    );
+      const assetExists = await assetRepository.existsBy({
+        id: assetId,
+        productId,
+      });
+      if (!assetExists) {
+        throw new NotFoundException(`Asset with ID ${assetId} not found`);
+      }
+
+      await assetRepository.update({ productId }, { isPrimary: false });
+      await assetRepository.update(
+        { id: assetId, productId },
+        { isPrimary: true },
+      );
+    });
   }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Private Helper Methods
   // ─────────────────────────────────────────────────────────────────────────
 
-  /**
-   * Triggers async embedding generation without blocking.
-   */
-  private async triggerEmbeddingGeneration(productId: string): Promise<void> {
-    await this.embeddingService.updateForProduct(productId);
+  private scheduleEmbeddingGeneration(productId: string): void {
+    void this.embeddingService
+      .updateForProduct(productId)
+      .catch((error: unknown) => {
+        this.logger.error(
+          `Embedding generation failed for product ${productId}`,
+          error instanceof Error ? error.stack : undefined,
+        );
+      });
   }
 
   private shouldRegenerateEmbedding(dto: UpdateProductDto): boolean {
@@ -342,16 +380,17 @@ export class ProductsService {
   private async createAssets(
     productId: string,
     assets: CreateProductAssetDto[],
+    assetRepository: Repository<ProductAsset>,
   ): Promise<ProductAsset[]> {
     const assetEntities = assets.map((asset, index) =>
-      this.assetRepository.create({
+      assetRepository.create({
         ...asset,
         productId,
         isPrimary: index === 0 ? true : (asset.isPrimary ?? false),
       }),
     );
 
-    return this.assetRepository.save(assetEntities);
+    return assetRepository.save(assetEntities);
   }
 
   private validateOwnership(product: Product, sellerId: string): void {
@@ -453,10 +492,11 @@ export class ProductsService {
   }
 
   private async validateSelectableCategory(
-    categoryId?: string | null,
+    categoryId: string | null | undefined,
+    categoryRepository: Repository<Category>,
   ): Promise<void> {
     if (!categoryId) return;
-    const category = await this.categoryRepository.findOne({
+    const category = await categoryRepository.findOne({
       where: { id: categoryId },
     });
     if (!category)
@@ -471,27 +511,35 @@ export class ProductsService {
   private async createDefaultListing(
     product: Product,
     sellerId: string,
+    manager: EntityManager,
   ): Promise<void> {
-    const location = await this.vendorLocationRepository
-      .createQueryBuilder('location')
-      .innerJoin(
-        'location.vendorProfile',
-        'profile',
-        'profile.userId = :sellerId',
-        { sellerId },
-      )
-      .where('location.isPrimary = true')
-      .getOne();
+    const location = await manager.getRepository(VendorLocation).findOne({
+      where: {
+        isPrimary: true,
+        vendorProfile: { userId: sellerId },
+      },
+    });
     if (!location) {
       throw new BadRequestException(
         'Complete the vendor business location before creating products',
       );
     }
-    const market = await this.marketsService.requireActive(
-      location.countryCode,
-    );
-    await this.listingRepository.save(
-      this.listingRepository.create({
+
+    const market = await manager.getRepository(Market).findOne({
+      where: {
+        code: location.countryCode.toUpperCase(),
+        isActive: true,
+      },
+    });
+    if (!market) {
+      throw new NotFoundException(
+        `Market ${location.countryCode} is not available`,
+      );
+    }
+
+    const listingRepository = manager.getRepository(ProductListing);
+    await listingRepository.save(
+      listingRepository.create({
         productId: product.id,
         vendorLocationId: location.id,
         marketCode: market.code,
@@ -501,6 +549,40 @@ export class ProductsService {
         isActive: true,
       }),
     );
+  }
+
+  private async requireProduct(
+    id: string,
+    productRepository: Repository<Product>,
+  ): Promise<Product> {
+    const product = await productRepository.findOne({ where: { id } });
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+    return product;
+  }
+
+  private async findOneWithRepository(
+    id: string,
+    productRepository: Repository<Product>,
+  ): Promise<Product> {
+    const product = await productRepository.findOne({
+      where: { id },
+      relations: [
+        'assets',
+        'category',
+        'seller',
+        'listings',
+        'listings.market',
+        'listings.vendorLocation',
+      ],
+    });
+
+    if (!product) {
+      throw new NotFoundException(`Product with ID ${id} not found`);
+    }
+
+    return product;
   }
 
   private applyListingSnapshot(product: Product): void {
