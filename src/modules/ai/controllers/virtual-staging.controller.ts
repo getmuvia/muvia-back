@@ -57,6 +57,6 @@ export class VirtualStagingController {
         @Body() dto: VirtualStagingRequestDto,
         @CurrentUser('id') userId: string,
     ): Promise<VirtualStagingResponseDto> {
-        return this.stagingService.stageRoom(dto, userId);
+        return this.stagingService.generateStagedRoom(dto, userId);
     }
 }

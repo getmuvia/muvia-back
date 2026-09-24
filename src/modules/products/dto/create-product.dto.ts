@@ -9,7 +9,6 @@ import {
     IsObject,
     Min,
     ValidateNested,
-    ArrayMinSize,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { CreateProductAssetDto } from './create-product-asset.dto';
