@@ -1,4 +1,4 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import type { IEmbeddingProvider, EmbeddingTaskType } from '../../interfaces/embedding-provider.interface';
 import { EMBEDDING_PROVIDER } from '../../interfaces/embedding-provider.interface';
 
@@ -17,8 +17,6 @@ import { EMBEDDING_PROVIDER } from '../../interfaces/embedding-provider.interfac
  */
 @Injectable()
 export class VectorService {
-    private readonly logger = new Logger(VectorService.name);
-
     constructor(
         @Inject(EMBEDDING_PROVIDER)
         private readonly embeddingProvider: IEmbeddingProvider,

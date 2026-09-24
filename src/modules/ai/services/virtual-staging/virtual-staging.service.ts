@@ -151,16 +151,6 @@ export class VirtualStagingService {
     }
 
     /**
-     * @deprecated Use generateStagedRoom instead. Kept for backward compatibility.
-     */
-    async stageRoom(
-        dto: VirtualStagingRequestDto,
-        userId: string,
-    ): Promise<VirtualStagingResponseDto> {
-        return this.generateStagedRoom(dto, userId);
-    }
-
-    /**
      * Atomically reserves one generation. The first reservation on a new day
      * resets the allowance and immediately consumes one use.
      */
@@ -314,7 +304,8 @@ export class VirtualStagingService {
                 this.logger.debug('Analyzing room via private GCS object.');
                 return await this.visionProvider.analyzeRoom({ key: gcsKey });
             } catch (error) {
-                this.logger.warn(`GCS key analysis failed: ${error.message}`);
+                const message = error instanceof Error ? error.message : 'Unknown error';
+                this.logger.warn(`GCS key analysis failed: ${message}`);
                 if (externalUrl) {
                     this.logger.debug(`Falling back to URL analysis`);
                     return await this.visionProvider.analyzeRoom({ url: externalUrl });
@@ -348,7 +339,7 @@ export class VirtualStagingService {
         if (gcsKey) {
             try {
                 return await this.imageGenerator.generate({ ...baseRequest, imageSource: { key: gcsKey } });
-            } catch (error) {
+            } catch {
                 this.logger.warn(`GCS key generation failed, falling back to URL...`);
             }
         }
