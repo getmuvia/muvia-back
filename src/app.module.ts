@@ -17,6 +17,7 @@ import { AiModule } from './modules/ai/ai.module';
 import { MarketsModule } from './modules/markets/markets.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
+import { SearchModule } from './modules/search/search.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { TelemetryModule } from './modules/telemetry/telemetry.module';
     CategoriesModule,
     FilesModule,
     AiModule,
+    SearchModule,
     MarketsModule,
     TelemetryModule,
   ],
@@ -53,4 +55,3 @@ export class AppModule implements NestModule {
     consumer.apply(CorrelationIdMiddleware).forRoutes('*');
   }
 }
-

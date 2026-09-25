@@ -12,6 +12,10 @@ export const AI_ENV_KEYS = {
   imageModel: 'GCP_IMAGEN_MODEL',
   embeddingLocation: 'GCP_EMBEDDING_LOCATION',
   embeddingModel: 'GCP_EMBEDDING_MODEL',
+  searchIntentLocation: 'GCP_SEARCH_INTENT_LOCATION',
+  searchIntentModel: 'GCP_SEARCH_INTENT_MODEL',
+  searchIntentEnabled: 'SEARCH_INTENT_AI_ENABLED',
+  searchIntentTimeoutMs: 'SEARCH_INTENT_TIMEOUT_MS',
 } as const;
 
 /**
@@ -27,9 +31,12 @@ export const AI_DEVELOPMENT_DEFAULTS = {
   imageModel: 'gemini-3.1-flash-image',
   embeddingLocation: 'us-central1',
   embeddingModel: 'gemini-embedding-001',
+  searchIntentLocation: 'global',
+  searchIntentModel: 'gemini-3.1-flash-lite',
 } as const;
 
 /** Runtime invariants coupled to the current database schema. */
 export const AI_RUNTIME_SETTINGS = {
   embeddingDimensions: 768,
+  searchIntentTimeoutMs: 2500,
 } as const;

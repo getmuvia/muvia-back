@@ -1,18 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { Product } from '../../products/entities/product.entity';
-import { normalizedSearchSql } from '../../../common/search/search-text';
-import type { SearchIntent } from '../services/search/search-intent';
 import {
   VALID_PRODUCT_DIMENSION_PATTERN,
   productDimensionCmSql,
 } from '../../../common/search/product-measurement';
+import { normalizedSearchSql } from '../../../common/search/search-text';
+import { Product } from '../../products/entities/product.entity';
+import type { SearchIntent } from '../interfaces/search-intent.interface';
 
-/**
- * Repository for lexical (text) product search.
- * Encapsulates SQL/QueryBuilder logic to avoid coupling AI module to ProductsService.
- */
+/** Encapsulates normalized text retrieval for catalog search. */
 @Injectable()
 export class ProductLexicalRepository {
   constructor(
@@ -20,11 +17,6 @@ export class ProductLexicalRepository {
     private readonly productRepository: Repository<Product>,
   ) {}
 
-  /**
-   * Retrieve normalized word matches and explicit aliases before semantic ranking.
-   * Rank identity matches before descriptions so recent incidental mentions cannot
-   * displace relevant candidates when the fetch limit is reached.
-   */
   async search(
     intent: SearchIntent,
     limit: number,
@@ -38,24 +30,24 @@ export class ProductLexicalRepository {
     const description = `(' ' || ${normalizedSearchSql('product.description')} || ' ')`;
     const material = `(' ' || ${normalizedSearchSql("product.specifications ->> 'material'")} || ' ')`;
     const parameters = Object.fromEntries(
-      terms.map((term, i) => [
-        `term${i}`,
+      terms.map((term, index) => [
+        `term${index}`,
         !intent.categoryCode && terms.length === 1 && term.length >= 3
           ? `% ${term}%`
           : `% ${term} %`,
       ]),
     );
     const conditions = terms.map(
-      (_, i) =>
-        `(${title} LIKE :term${i} OR ${keywords} LIKE :term${i} OR ${description} LIKE :term${i} OR ${material} LIKE :term${i})`,
+      (_, index) =>
+        `(${title} LIKE :term${index} OR ${keywords} LIKE :term${index} OR ${description} LIKE :term${index} OR ${material} LIKE :term${index})`,
     );
     const rank = terms
-      .map((term, i) => {
+      .map((term, index) => {
         const typeWeight = intent.aliases.includes(term) ? 10 : 1;
-        return `(CASE WHEN ${title} LIKE :term${i} THEN ${typeWeight * 3} ELSE 0 END
-        + CASE WHEN ${keywords} LIKE :term${i} THEN ${typeWeight * 2} ELSE 0 END
-        + CASE WHEN ${description} LIKE :term${i} THEN 1 ELSE 0 END
-        + CASE WHEN ${material} LIKE :term${i} THEN 2 ELSE 0 END)`;
+        return `(CASE WHEN ${title} LIKE :term${index} THEN ${typeWeight * 3} ELSE 0 END
+        + CASE WHEN ${keywords} LIKE :term${index} THEN ${typeWeight * 2} ELSE 0 END
+        + CASE WHEN ${description} LIKE :term${index} THEN 1 ELSE 0 END
+        + CASE WHEN ${material} LIKE :term${index} THEN 2 ELSE 0 END)`;
       })
       .join(' + ');
 

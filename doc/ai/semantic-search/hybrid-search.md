@@ -1,5 +1,9 @@
 # Hybrid catalog search
 
+> The current module architecture, intent provider and response contract are
+> documented in [`doc/search/README.md`](../../search/README.md). This document
+> remains the detailed reference for deterministic retrieval and ranking rules.
+
 POST /ai/hybrid retrieves text and vector candidates, validates their relevance,
 and returns main results separately from broader suggestions. The catalog and the
 navigation search modal use the same response contract.
@@ -48,7 +52,7 @@ Request: { "query": "sofa", "limit": 20, "marketCode": "BO", "locale": "es-BO" }
 
 Response example (scores are illustrative):
 
-~~~json
+```json
 {
   "query": "sofa",
   "results": [
@@ -66,7 +70,7 @@ Response example (scores are illustrative):
   "count": 1,
   "relatedResults": []
 }
-~~~
+```
 
 results contains only main matches; count is the number of main results returned,
 not an exhaustive catalog total. relatedResults is a separate array with the same

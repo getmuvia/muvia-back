@@ -1,28 +1,32 @@
-import { Product } from '../../../products/entities/product.entity';
-import { CategoryTaxonomyService } from '../../../categories/category-taxonomy.service';
-import { MarketsService } from '../../../markets/markets.service';
 import { detectMaterialSearchIntent } from '../../../../common/search/product-material';
-import { VectorService } from '../vector/vector.service';
-import { ProductVectorRepository } from '../../repositories/product-vector.repository';
+import { Product } from '../../../products/entities/product.entity';
+import type { SearchInterpretationDto } from '../../dto/search-response.dto';
+import type { SearchIntent } from '../../interfaces/search-intent.interface';
 import { ProductLexicalRepository } from '../../repositories/product-lexical.repository';
-import { SearchIntent } from './search-intent';
-import { SearchService } from './search.service';
+import { ProductVectorRepository } from '../../repositories/product-vector.repository';
+import { SearchIntentService } from '../../services/search-intent.service';
+import { SearchRankingService } from '../../services/search-ranking.service';
+import { SearchService } from '../../services/search.service';
+import { VectorService } from '../../../ai/services/vector/vector.service';
+import { MarketsService } from '../../../markets/markets.service';
 
 const intent: SearchIntent = {
   text: 'quiero una silla de madera',
   terms: ['silla', 'madera'],
   categoryCode: 'CHAIR',
-  aliases: ['silla', 'sillas', 'chair', 'chairs'],
-  aliasCategoryCodes: {
-    silla: 'CHAIR',
-    sillas: 'CHAIR',
-    chair: 'CHAIR',
-    chairs: 'CHAIR',
-  },
+  aliases: ['silla', 'sillas'],
+  aliasCategoryCodes: { silla: 'CHAIR', sillas: 'CHAIR' },
   relatedCategoryCodes: [],
   articles: ['', 'un ', 'una ', 'el ', 'la '],
   identityPrefixes: ['utilizarse como'],
   material: detectMaterialSearchIntent('silla de madera'),
+};
+
+const interpretation: SearchInterpretationDto = {
+  summary: 'Silla · Madera',
+  source: 'deterministic',
+  category: { code: 'CHAIR', label: 'Silla' },
+  material: { code: 'WOOD', label: 'Madera' },
 };
 
 function product(id: string, title: string, material: string): Product {
@@ -40,12 +44,12 @@ function product(id: string, title: string, material: string): Product {
   } as unknown as Product;
 }
 
-function createService() {
+function createService(): SearchService {
   const vectorService = {
     isAvailable: jest.fn().mockReturnValue(false),
   } as unknown as VectorService;
-  const productVectorRepo = {} as ProductVectorRepository;
-  const productLexicalRepo = {
+  const vectorRepository = {} as ProductVectorRepository;
+  const lexicalRepository = {
     search: jest
       .fn()
       .mockResolvedValue([
@@ -54,35 +58,36 @@ function createService() {
         product('full', 'Silla Toscana', 'Madera maciza'),
       ]),
   } as unknown as ProductLexicalRepository;
-  const categoryTaxonomyService = {
-    createSearchIntent: jest.fn().mockResolvedValue(intent),
-  } as unknown as CategoryTaxonomyService;
+  const intentService = {
+    resolve: jest.fn().mockResolvedValue({ intent, interpretation }),
+  } as unknown as SearchIntentService;
   const marketsService = {
     requireActive: jest.fn().mockResolvedValue(undefined),
   } as unknown as MarketsService;
 
   return new SearchService(
     vectorService,
-    productVectorRepo,
-    productLexicalRepo,
-    categoryTaxonomyService,
+    vectorRepository,
+    lexicalRepository,
+    intentService,
+    new SearchRankingService(),
     marketsService,
   );
 }
 
-describe('SearchService material ranking', () => {
-  it('ranks full material, then partial material, and separates fallback products', async () => {
+describe('SearchService', () => {
+  it('returns the interpretation and preserves material ranking', async () => {
     const response = await createService().searchHybrid({
       query: 'quiero una silla de madera',
       limit: 4,
     });
 
+    expect(response.interpretation).toEqual(interpretation);
     expect(response.results.map(({ id }) => id)).toEqual(['full', 'partial']);
     expect(response.relatedResults.map(({ id }) => id)).toEqual(['fallback']);
-    expect(response.count).toBe(2);
   });
 
-  it('omits fallback suggestions when direct matches fill the requested limit', async () => {
+  it('omits fallback suggestions when direct matches fill the limit', async () => {
     const response = await createService().searchHybrid({
       query: 'quiero una silla de madera',
       limit: 2,

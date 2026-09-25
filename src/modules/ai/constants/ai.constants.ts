@@ -16,42 +16,17 @@
  * Virtual staging configuration constants.
  */
 export const VIRTUAL_STAGING = {
-    /** Maximum number of product images to include as visual references */
-    MAX_REFERENCE_IMAGES: 3,
+  /** Maximum number of product images to include as visual references */
+  MAX_REFERENCE_IMAGES: 3,
 
-    /** Default maximum products to suggest if not specified */
-    DEFAULT_MAX_PRODUCTS: 4,
+  /** Default maximum products to suggest if not specified */
+  DEFAULT_MAX_PRODUCTS: 4,
 
-    /** Number of products to fetch per search query */
-    SEARCH_RESULTS_PER_QUERY: 5,
+  /** Number of products to fetch per search query */
+  SEARCH_RESULTS_PER_QUERY: 5,
 
-    /** Maximum furniture items to use for search queries */
-    MAX_FURNITURE_QUERIES: 3,
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Search
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Search configuration constants.
- */
-export const SEARCH = {
-    /** Multiplier for fetching extra results to ensure best aren't missed */
-    FETCH_MULTIPLIER: 3,
-
-    /** Default result limit */
-    DEFAULT_LIMIT: 10,
-
-    /** Minimum similarity threshold for semantic search */
-    DEFAULT_SIMILARITY_THRESHOLD: 0.3,
-
-    /** Suggestions also require a compatible type for explicit product queries. */
-    RELATED_SIMILARITY_THRESHOLD: 0.45,
-    RELATED_LIMIT: 6,
-
-    /** Semantic evidence ranks eligible products; it cannot establish their type. */
-    SEMANTIC_RANK_WEIGHT: 0.25,
+  /** Maximum furniture items to use for search queries */
+  MAX_FURNITURE_QUERIES: 3,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,41 +37,20 @@ export const SEARCH = {
  * Retry configuration constants.
  */
 export const RETRY = {
-    /** Default maximum retry attempts */
-    MAX_RETRIES: 3,
+  /** Default maximum retry attempts */
+  MAX_RETRIES: 3,
 
-    /** Default initial delay in milliseconds */
-    INITIAL_DELAY_MS: 1000,
+  /** Default initial delay in milliseconds */
+  INITIAL_DELAY_MS: 1000,
 
-    /** Initial delay for Gemini/Vertex AI calls (higher due to quota) */
-    AI_INITIAL_DELAY_MS: 2000,
+  /** Initial delay for Gemini/Vertex AI calls (higher due to quota) */
+  AI_INITIAL_DELAY_MS: 2000,
 
-    /** Maximum delay cap in milliseconds */
-    MAX_DELAY_MS: 30000,
+  /** Maximum delay cap in milliseconds */
+  MAX_DELAY_MS: 30000,
 
-    /** Backoff multiplier */
-    BACKOFF_MULTIPLIER: 2,
-} as const;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Input validation constants.
- */
-export const VALIDATION = {
-    /** Minimum query length for search */
-    MIN_QUERY_LENGTH: 2,
-
-    /** Maximum queries per batch search */
-    MAX_BATCH_QUERIES: 10,
-
-    /** Maximum results per query */
-    MAX_RESULTS_PER_QUERY: 50,
-
-    /** Maximum products to suggest */
-    MAX_PRODUCTS: 20,
+  /** Backoff multiplier */
+  BACKOFF_MULTIPLIER: 2,
 } as const;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,17 +61,17 @@ export const VALIDATION = {
  * Supported design styles for virtual staging.
  */
 export const DESIGN_STYLES = [
-    'modern',
-    'minimalist',
-    'rustic',
-    'industrial',
-    'scandinavian',
-    'bohemian',
-    'traditional',
-    'contemporary',
+  'modern',
+  'minimalist',
+  'rustic',
+  'industrial',
+  'scandinavian',
+  'bohemian',
+  'traditional',
+  'contemporary',
 ] as const;
 
-export type DesignStyle = typeof DESIGN_STYLES[number];
+export type DesignStyle = (typeof DESIGN_STYLES)[number];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Room Types
@@ -127,14 +81,14 @@ export type DesignStyle = typeof DESIGN_STYLES[number];
  * Common room types detected by vision AI.
  */
 export const ROOM_TYPES = [
-    'living room',
-    'bedroom',
-    'dining room',
-    'office',
-    'kitchen',
-    'bathroom',
-    'studio',
-    'loft',
+  'living room',
+  'bedroom',
+  'dining room',
+  'office',
+  'kitchen',
+  'bathroom',
+  'studio',
+  'loft',
 ] as const;
 
-export type RoomType = typeof ROOM_TYPES[number];
+export type RoomType = (typeof ROOM_TYPES)[number];

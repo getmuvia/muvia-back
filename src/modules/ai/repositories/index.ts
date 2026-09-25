@@ -1,1 +1,1 @@
-export * from './product-vector.repository';
+export * from './product-embedding.repository';
