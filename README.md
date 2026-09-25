@@ -3,6 +3,7 @@
 Welcome! This is the backend API for Itera, built with NestJS, TypeORM, PostgreSQL, and Google AI services.
 
 It includes:
+
 - Authentication (JWT)
 - Users, products, categories, and files modules
 - AI features (semantic embeddings, vision, image generation, virtual staging)
@@ -12,6 +13,7 @@ It includes:
 ### 1) Prerequisites
 
 Make sure you have:
+
 - Node.js 20+
 - npm 10+
 - PostgreSQL 14+ (local) or Cloud SQL (Google Cloud)
@@ -55,6 +57,11 @@ GCP_IMAGEN_MODEL=gemini-3.1-flash-image
 
 GCP_EMBEDDING_LOCATION=us-central1
 GCP_EMBEDDING_MODEL=gemini-embedding-001
+
+GCP_SEARCH_INTENT_LOCATION=global
+GCP_SEARCH_INTENT_MODEL=gemini-3.1-flash-lite
+SEARCH_INTENT_AI_ENABLED=true
+SEARCH_INTENT_TIMEOUT_MS=2500
 
 GCP_3D_LOCATION=us-central1
 GCP_3D_WORKER_IMAGE_URI=us-central1-docker.pkg.dev/PROJECT_ID/muvia/muvia-3d-worker:latest
@@ -109,6 +116,10 @@ explicitly; infrastructure injects those values into Cloud Run.
 - `GCP_IMAGEN_MODEL`: model for generated images / virtual staging
 - `GCP_EMBEDDING_LOCATION`: embeddings location (`us-central1` for the current provider)
 - `GCP_EMBEDDING_MODEL`: text embedding model (`gemini-embedding-001` recommended)
+- `GCP_SEARCH_INTENT_LOCATION`: location for the search-intent model (`global` by default)
+- `GCP_SEARCH_INTENT_MODEL`: low-latency model used only to structure buyer intent
+- `SEARCH_INTENT_AI_ENABLED`: feature flag; deterministic search remains available when disabled
+- `SEARCH_INTENT_TIMEOUT_MS`: maximum provider wait before deterministic fallback
 
 The values in the setup example are development defaults. Do not treat them as
 production recommendations; model migrations and lifecycle changes must be
@@ -148,6 +159,7 @@ To use Google services without interactive auth prompts:
 ### In cloud (recommended)
 
 Run with a Service Account and grant minimum required roles:
+
 - `roles/aiplatform.user`
 - `roles/storage.objectAdmin` (or narrower storage roles)
 - `roles/cloudsql.client` (if connecting to Cloud SQL)

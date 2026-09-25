@@ -6,11 +6,11 @@ import {
   searchTerms,
 } from '../../common/search/search-text';
 import { getSearchLocale } from '../../common/search/locales';
-import type { SearchIntent } from '../ai/services/search/search-intent';
 import { parseProductMeasurementSearch } from '../../common/search/product-measurement';
 import { detectMaterialSearchIntent } from '../../common/search/product-material';
 import { CategoryAlias } from './entities/category-alias.entity';
 import { CategoryRelation } from './entities/category-relation.entity';
+import type { CategoryTaxonomyIntent } from './interfaces/category-taxonomy-intent.interface';
 
 @Injectable()
 export class CategoryTaxonomyService {
@@ -34,7 +34,7 @@ export class CategoryTaxonomyService {
   async createSearchIntent(
     query: string,
     locale = 'es-BO',
-  ): Promise<SearchIntent> {
+  ): Promise<CategoryTaxonomyIntent> {
     const parsedSearch = parseProductMeasurementSearch(query, locale);
     const text = normalizeSearchText(parsedSearch.query);
     const terms = searchTerms(parsedSearch.query, locale);
@@ -64,6 +64,7 @@ export class CategoryTaxonomyService {
       text,
       terms,
       categoryCode,
+      categoryLabel: matches[0]?.alias,
       aliases: [...new Set(categoryAliases)],
       aliasCategoryCodes,
       relatedCategoryCodes,

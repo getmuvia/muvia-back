@@ -1,8 +1,13 @@
 # Semantic Search - Technical Documentation
 
+> Search orchestration now lives in `src/modules/search`. See
+> [`doc/search/README.md`](../../search/README.md) for the current module
+> structure and buyer-intent provider. This document remains focused on the
+> shared embedding infrastructure.
+
 ## Overview
 
-This document describes the implementation of **Semantic Search** for the Itera e-commerce platform. Unlike traditional keyword-based search, semantic search understands the *meaning* and *context* of user queries, enabling more intuitive and accurate product discovery.
+This document describes the implementation of **Semantic Search** for the Itera e-commerce platform. Unlike traditional keyword-based search, semantic search understands the _meaning_ and _context_ of user queries, enabling more intuitive and accurate product discovery.
 
 ## Table of Contents
 
@@ -25,16 +30,17 @@ This document describes the implementation of **Semantic Search** for the Itera 
 
 The previous search implementation used SQL `ILIKE` queries, which have several limitations:
 
-| Issue | Example |
-|-------|---------|
+| Issue                         | Example                                                        |
+| ----------------------------- | -------------------------------------------------------------- |
 | **No semantic understanding** | Searching "furniture for sitting" won't find "chair" or "sofa" |
-| **No typo tolerance** | "sofaa" won't match "sofa" |
-| **Language barriers** | "couch" won't match "sofa" |
-| **No context awareness** | "modern living room table" requires exact keyword matches |
+| **No typo tolerance**         | "sofaa" won't match "sofa"                                     |
+| **Language barriers**         | "couch" won't match "sofa"                                     |
+| **No context awareness**      | "modern living room table" requires exact keyword matches      |
 
 ### User Requirement
 
 The user needed an intelligent search that accepts natural language descriptions like:
+
 ```json
 [
   "light gray three-seat nordic-style sofa with wooden legs",
@@ -72,39 +78,31 @@ And returns semantically relevant products, even if they don't contain those exa
 
 Following **Ports & Adapters** pattern and **NestJS best practices**:
 
-```
+```text
 src/modules/ai/
 ├── ai.module.ts
-├── controllers/
-│   ├── search.controller.ts
-│   └── embedding.controller.ts
-├── dto/
-│   └── search-query.dto.ts
-├── interfaces/
-│   ├── search-result.interface.ts
-│   └── embedding-provider.interface.ts
-├── providers/
-│   └── google/
-│       └── vertex-embedding.provider.ts
-├── repositories/
-│   └── product-vector.repository.ts
+├── interfaces/embedding-provider.interface.ts
+├── providers/google/vertex-embedding.provider.ts
+├── repositories/product-embedding.repository.ts
 └── services/
-    ├── vector/
-    │   └── vector.service.ts
-    ├── embedding/
-    │   └── embedding.service.ts
-    └── search/
-        └── search.service.ts
+    ├── vector/vector.service.ts
+    └── embedding/embedding.service.ts
+
+src/modules/search/
+├── search.module.ts
+├── search.controller.ts
+├── repositories/product-vector.repository.ts
+└── services/search.service.ts
 ```
 
 ### Design Patterns Applied
 
-| Pattern | Application |
-|---------|-------------|
-| **Ports & Adapters** | IEmbeddingProvider interface with VertexEmbeddingProvider adapter |
-| **Single Responsibility** | Each service/repository has one reason to change |
-| **Dependency Injection** | All dependencies injected via constructors |
-| **Repository Pattern** | ProductVectorRepository encapsulates SQL queries |
+| Pattern                   | Application                                                       |
+| ------------------------- | ----------------------------------------------------------------- |
+| **Ports & Adapters**      | IEmbeddingProvider interface with VertexEmbeddingProvider adapter |
+| **Single Responsibility** | Each service/repository has one reason to change                  |
+| **Dependency Injection**  | All dependencies injected via constructors                        |
+| **Repository Pattern**    | Separate repositories encapsulate persistence and vector queries  |
 
 ---
 
@@ -112,11 +110,11 @@ src/modules/ai/
 
 ### AI/ML: Google Vertex AI
 
-| Aspect | Choice | Justification |
-|--------|--------|---------------|
-| **Provider** | Google Cloud Vertex AI | Consistent with existing GCP infrastructure |
-| **Model** | `gemini-embedding-001` | Stable multilingual text embedding model; this backend requests 768 dimensions |
-| **SDK** | `@google-cloud/aiplatform` | Official low-level Google Cloud AI Platform SDK for Node.js |
+| Aspect       | Choice                     | Justification                                                                  |
+| ------------ | -------------------------- | ------------------------------------------------------------------------------ |
+| **Provider** | Google Cloud Vertex AI     | Consistent with existing GCP infrastructure                                    |
+| **Model**    | `gemini-embedding-001`     | Stable multilingual text embedding model; this backend requests 768 dimensions |
+| **SDK**      | `@google-cloud/aiplatform` | Official low-level Google Cloud AI Platform SDK for Node.js                    |
 
 The provider requests `outputDimensionality: 768` to preserve the existing
 `vector(768)` schema and applies L2 normalization before persistence, as required
@@ -128,28 +126,35 @@ The `VertexEmbeddingProvider` implements `IEmbeddingProvider` interface:
 
 ```typescript
 interface IEmbeddingProvider {
-    generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<EmbeddingResult>;
-    isAvailable(): boolean;
+  generateEmbedding(
+    text: string,
+    taskType?: EmbeddingTaskType,
+  ): Promise<EmbeddingResult>;
+  isAvailable(): boolean;
 }
 
-type EmbeddingTaskType = 'RETRIEVAL_QUERY' | 'RETRIEVAL_DOCUMENT' | 'SEMANTIC_SIMILARITY';
+type EmbeddingTaskType =
+  | 'RETRIEVAL_QUERY'
+  | 'RETRIEVAL_DOCUMENT'
+  | 'SEMANTIC_SIMILARITY';
 
 interface EmbeddingResult {
-    embedding: number[];
-    dimensions: number;
+  embedding: number[];
+  dimensions: number;
 }
 ```
 
 **Task Types:**
+
 - `RETRIEVAL_DOCUMENT`: Used when generating embeddings for products (stored in DB)
 - `RETRIEVAL_QUERY`: Used when generating embeddings for search queries
 
 ### Database: PostgreSQL + pgvector
 
-| Component | Purpose |
-|-----------|---------|
-| **PostgreSQL** | Already used as the primary database |
-| **pgvector** | Extension for storing and querying vector embeddings |
+| Component           | Purpose                                                 |
+| ------------------- | ------------------------------------------------------- |
+| **PostgreSQL**      | Already used as the primary database                    |
+| **pgvector**        | Extension for storing and querying vector embeddings    |
 | **Cosine Distance** | Operator `<=>` for measuring similarity between vectors |
 
 ---
@@ -165,12 +170,16 @@ Low-level Vertex AI client using `PredictionServiceClient`:
 ```typescript
 @Injectable()
 export class VertexEmbeddingProvider implements IEmbeddingProvider {
-    async generateEmbedding(text: string, taskType?: EmbeddingTaskType): Promise<EmbeddingResult>;
-    isAvailable(): boolean;
+  async generateEmbedding(
+    text: string,
+    taskType?: EmbeddingTaskType,
+  ): Promise<EmbeddingResult>;
+  isAvailable(): boolean;
 }
 ```
 
 Features:
+
 - Uses regional API endpoint (e.g., `us-central1-aiplatform.googleapis.com`)
 - Configurable via `GCP_EMBEDDING_LOCATION` and `GCP_EMBEDDING_MODEL`
 - Automatic retry with exponential backoff
@@ -183,25 +192,32 @@ Uses `IEmbeddingProvider` via dependency injection:
 ```typescript
 @Injectable()
 export class VectorService {
-    constructor(
-        @Inject(EMBEDDING_PROVIDER)
-        private readonly embeddingProvider: IEmbeddingProvider
-    ) {}
+  constructor(
+    @Inject(EMBEDDING_PROVIDER)
+    private readonly embeddingProvider: IEmbeddingProvider,
+  ) {}
 
-    async generateEmbedding(text: string, taskType?: string): Promise<number[]>;
-    toVectorString(embedding: number[]): string;
-    isAvailable(): boolean;
+  async generateEmbedding(text: string, taskType?: string): Promise<number[]>;
+  toVectorString(embedding: number[]): string;
+  isAvailable(): boolean;
 }
+```
+
+#### ProductEmbeddingRepository
+
+Owns product embedding persistence:
+
+```typescript
+async updateEmbedding(productId: string, embedding: string): Promise<void>
+async findPendingEmbeddingRefresh(): Promise<Product[]>
 ```
 
 #### ProductVectorRepository
 
-Encapsulates all pgvector SQL queries:
+Lives in `SearchModule` and owns similarity retrieval:
 
 ```typescript
 async findBySimilarity(embedding: string, limit: number, threshold: number): Promise<SearchProductResult[]>
-async updateEmbedding(productId: string, embedding: string): Promise<void>
-async findPendingEmbeddingRefresh(): Promise<Product[]>
 ```
 
 #### SearchService
@@ -221,6 +237,7 @@ async searchBatch(dto: SearchQueryDto): Promise<SearchResult[]>
 Performs batch semantic search on products.
 
 **Request Body:**
+
 ```json
 {
   "queries": [
@@ -232,13 +249,14 @@ Performs batch semantic search on products.
 }
 ```
 
-| Field | Type | Required | Default | Description |
-|-------|------|----------|---------|-------------|
-| `queries` | `string[]` | Yes | - | Natural language search queries (1-10 items) |
-| `limit` | `number` | No | 5 | Max results per query (1-50) |
-| `threshold` | `number` | No | 0.5 | Minimum similarity score (0-1) |
+| Field       | Type       | Required | Default | Description                                  |
+| ----------- | ---------- | -------- | ------- | -------------------------------------------- |
+| `queries`   | `string[]` | Yes      | -       | Natural language search queries (1-10 items) |
+| `limit`     | `number`   | No       | 5       | Max results per query (1-50)                 |
+| `threshold` | `number`   | No       | 0.5     | Minimum similarity score (0-1)               |
 
 **Response:**
+
 ```json
 [
   {
@@ -263,6 +281,7 @@ Regenerates embeddings that are missing or were produced by another model.
 Requires authentication.
 
 **Response:**
+
 ```json
 {
   "updated": 42,
@@ -325,8 +344,8 @@ CREATE EXTENSION IF NOT EXISTS vector;
 ### Verify Column Creation
 
 ```sql
-SELECT column_name, data_type 
-FROM information_schema.columns 
+SELECT column_name, data_type
+FROM information_schema.columns
 WHERE table_name = 'products' AND column_name = 'embedding';
 ```
 
@@ -365,17 +384,17 @@ curl -X POST http://localhost:3000/ai/search \
 
 ### Embedding Dimensions
 
-| Model | Dimensions | Storage per product |
-|-------|------------|---------------------|
-| gemini-embedding-001 (requested output) | 768 | ~6 KB |
+| Model                                   | Dimensions | Storage per product |
+| --------------------------------------- | ---------- | ------------------- |
+| gemini-embedding-001 (requested output) | 768        | ~6 KB               |
 
 ### Indexing (Recommended for Production)
 
 For databases with >10,000 products:
 
 ```sql
-CREATE INDEX ON products 
-USING ivfflat (embedding vector_cosine_ops) 
+CREATE INDEX ON products
+USING ivfflat (embedding vector_cosine_ops)
 WITH (lists = 100);
 ```
 
@@ -405,6 +424,7 @@ WITH (lists = 100);
 ### Low-Quality Search Results
 
 **Fixes:**
+
 1. Lower the `threshold` parameter (e.g., 0.3)
 2. Ensure products have detailed `description` and `keywords`
 3. Run `/ai/embeddings/regenerate` after improving product data

@@ -39,6 +39,8 @@ describe('envValidationSchema AI configuration', () => {
       GCP_IMAGEN_MODEL: AI_DEVELOPMENT_DEFAULTS.imageModel,
       GCP_EMBEDDING_LOCATION: AI_DEVELOPMENT_DEFAULTS.embeddingLocation,
       GCP_EMBEDDING_MODEL: AI_DEVELOPMENT_DEFAULTS.embeddingModel,
+      GCP_SEARCH_INTENT_LOCATION: AI_DEVELOPMENT_DEFAULTS.searchIntentLocation,
+      GCP_SEARCH_INTENT_MODEL: AI_DEVELOPMENT_DEFAULTS.searchIntentModel,
     });
   });
 
@@ -50,6 +52,8 @@ describe('envValidationSchema AI configuration', () => {
       GCP_IMAGEN_MODEL: 'custom-image-model',
       GCP_EMBEDDING_LOCATION: 'europe-west4',
       GCP_EMBEDDING_MODEL: 'custom-embedding-model',
+      GCP_SEARCH_INTENT_LOCATION: 'global',
+      GCP_SEARCH_INTENT_MODEL: 'custom-search-intent-model',
     };
 
     const { error, value } = envValidationSchema.validate({
@@ -83,6 +87,8 @@ describe('envValidationSchema AI configuration', () => {
         'GCP_IMAGEN_MODEL',
         'GCP_EMBEDDING_LOCATION',
         'GCP_EMBEDDING_MODEL',
+        'GCP_SEARCH_INTENT_LOCATION',
+        'GCP_SEARCH_INTENT_MODEL',
       ]),
     );
   });
@@ -100,6 +106,8 @@ describe('envValidationSchema AI configuration', () => {
       GCP_IMAGEN_MODEL: 'image-model',
       GCP_EMBEDDING_LOCATION: 'us-central1',
       GCP_EMBEDDING_MODEL: 'embedding-model',
+      GCP_SEARCH_INTENT_LOCATION: 'global',
+      GCP_SEARCH_INTENT_MODEL: 'search-intent-model',
     });
 
     expect(error).toBeUndefined();

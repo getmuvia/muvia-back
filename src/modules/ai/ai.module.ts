@@ -8,18 +8,15 @@ import { RetryService } from './core/retry';
 import { ImageResolverService } from './core/image';
 
 // Repository
-import { ProductVectorRepository } from './repositories/product-vector.repository';
-import { ProductLexicalRepository } from './repositories/product-lexical.repository';
+import { ProductEmbeddingRepository } from './repositories/product-embedding.repository';
 
 // Services
 import { VectorService } from './services/vector/vector.service';
 import { EmbeddingService } from './services/embedding/embedding.service';
-import { SearchService } from './services/search/search.service';
 import { VirtualStagingService } from './services/virtual-staging/virtual-staging.service';
 import { VirtualStagingStorageService } from './services/virtual-staging/virtual-staging-storage.service';
 
 // Controllers
-import { SearchController } from './controllers/search.controller';
 import { EmbeddingController } from './controllers/embedding.controller';
 import { VirtualStagingController } from './controllers/virtual-staging.controller';
 
@@ -32,9 +29,11 @@ import { EMBEDDING_PROVIDER } from './interfaces/embedding-provider.interface';
 import { Vertex3DProvider } from './providers/google/vertex-3d.provider';
 import { Scan3dService } from './services/scan-3d/scan-3d.service';
 import { Scan3dController } from './controllers/scan-3d.controller';
-import { GeminiVisionProvider, GeminiImageProvider, VertexEmbeddingProvider } from './providers/google';
-import { CategoriesModule } from '../categories/categories.module';
-import { MarketsModule } from '../markets/markets.module';
+import {
+  GeminiVisionProvider,
+  GeminiImageProvider,
+  VertexEmbeddingProvider,
+} from './providers/google';
 
 /**
  * AI Module - Semantic search, embeddings, and virtual staging.
@@ -42,60 +41,52 @@ import { MarketsModule } from '../markets/markets.module';
  * Architecture:
  * - Ports & Adapters pattern for AI providers (Vision, Image Generation)
  * - VectorService: Vertex AI embeddings
- * - ProductVectorRepository: pgvector queries
+ * - ProductEmbeddingRepository: embedding persistence
  * - EmbeddingService: Embedding orchestration
- * - SearchService: Hybrid search orchestration
  * - VirtualStagingService: Room staging orchestration (provider-agnostic)
  *
  * To change AI providers, modify the useClass in the providers array.
  */
 @Module({
-    imports: [
-        TypeOrmModule.forFeature([Product, User]),
-        CategoriesModule,
-        MarketsModule,
-    ],
+  imports: [TypeOrmModule.forFeature([Product, User])],
 
-    controllers: [
-        SearchController,
-        EmbeddingController,
-        VirtualStagingController,
-        Scan3dController
-    ],
+  controllers: [
+    EmbeddingController,
+    VirtualStagingController,
+    Scan3dController,
+  ],
 
-    providers: [
-        RetryService,
-        ImageResolverService,
+  providers: [
+    RetryService,
+    ImageResolverService,
 
-        ProductVectorRepository,
-        ProductLexicalRepository,
+    ProductEmbeddingRepository,
 
-        VectorService,
-        EmbeddingService,
-        SearchService,
-        Scan3dService,
+    VectorService,
+    EmbeddingService,
+    Scan3dService,
 
-        {
-            provide: VISION_PROVIDER,
-            useClass: GeminiVisionProvider,
-        },
-        {
-            provide: IMAGE_GENERATOR,
-            useClass: GeminiImageProvider,
-        },
-        {
-            provide: SCAN_3D_PROVIDER,
-            useClass: Vertex3DProvider,
-        },
-        {
-            provide: EMBEDDING_PROVIDER,
-            useClass: VertexEmbeddingProvider,
-        },
+    {
+      provide: VISION_PROVIDER,
+      useClass: GeminiVisionProvider,
+    },
+    {
+      provide: IMAGE_GENERATOR,
+      useClass: GeminiImageProvider,
+    },
+    {
+      provide: SCAN_3D_PROVIDER,
+      useClass: Vertex3DProvider,
+    },
+    {
+      provide: EMBEDDING_PROVIDER,
+      useClass: VertexEmbeddingProvider,
+    },
 
-        VirtualStagingService,
-        VirtualStagingStorageService,
-    ],
+    VirtualStagingService,
+    VirtualStagingStorageService,
+  ],
 
-    exports: [EmbeddingService],
+  exports: [EmbeddingService, VectorService],
 })
-export class AiModule { }
+export class AiModule {}
