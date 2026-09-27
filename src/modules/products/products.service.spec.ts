@@ -178,6 +178,14 @@ describe('ProductsService transactional writes', () => {
     expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
   });
 
+  it('regenerates the embedding when structured specifications change', async () => {
+    await service.update(productId, sellerId, {
+      specifications: { material: 'Melamina' },
+    });
+
+    expect(embeddingService.updateForProduct).toHaveBeenCalledWith(productId);
+  });
+
   it('exposes a stable code when the requested product does not exist', async () => {
     productRepositoryInTransaction.findOne.mockResolvedValue(null);
 

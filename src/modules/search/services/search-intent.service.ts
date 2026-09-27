@@ -1,6 +1,6 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  detectMaterialSearchIntent,
+  resolveMaterialSearchIntent,
   type MaterialSearchIntent,
 } from '../../../common/search/product-material';
 import { ProductDimension } from '../../../common/search/product-measurement';
@@ -84,7 +84,7 @@ export class SearchIntentService {
     }
 
     const inferredMaterial = candidate.material
-      ? detectMaterialSearchIntent(candidate.material)
+      ? resolveMaterialSearchIntent(candidate.material)
       : undefined;
 
     return {
@@ -151,12 +151,16 @@ export class SearchIntentService {
   ): string | undefined {
     if (!material) return undefined;
     const candidateMaterial = candidate?.material
-      ? detectMaterialSearchIntent(candidate.material)
+      ? resolveMaterialSearchIntent(candidate.material)
       : undefined;
-    const label =
-      candidateMaterial?.code === material.code
-        ? candidate?.material
-        : material.aliases[0];
+    const sameMaterial =
+      candidateMaterial !== undefined &&
+      ((candidateMaterial.code !== undefined &&
+        candidateMaterial.code === material.code) ||
+        candidateMaterial.aliases.some((alias) =>
+          material.aliases.includes(alias),
+        ));
+    const label = sameMaterial ? candidate?.material : material.aliases[0];
     return label ? this.capitalize(label) : undefined;
   }
 

@@ -53,6 +53,16 @@ export const RETRY = {
   BACKOFF_MULTIPLIER: 2,
 } as const;
 
+// ───────────────────────────────────────────────────────────────────────────────
+// Product embeddings
+// ──────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Increment when the searchable product document changes. Stored vectors with
+ * another version remain usable during rollout and are selected for refresh.
+ */
+export const PRODUCT_EMBEDDING_CONTENT_VERSION = 2;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Design Styles
 // ─────────────────────────────────────────────────────────────────────────────

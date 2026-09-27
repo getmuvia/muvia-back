@@ -83,4 +83,26 @@ describe('SearchIntentService', () => {
     expect(result.interpretation.source).toBe('deterministic');
     expect(result.interpretation.summary).toBe('Escritorio');
   });
+
+  it('preserves an AI material that is not in a static material family', async () => {
+    const taxonomy = {
+      createSearchIntent: jest.fn().mockResolvedValue(baseIntent),
+    } as unknown as CategoryTaxonomyService;
+    const provider = {
+      isAvailable: jest.fn().mockReturnValue(true),
+      interpret: jest.fn().mockResolvedValue({ material: 'melamina' }),
+    } as unknown as SearchIntentProvider;
+
+    const result = await new SearchIntentService(taxonomy, provider).resolve(
+      'mueble de melamina',
+      'es-BO',
+    );
+
+    expect(result.intent.material).toEqual({ aliases: ['melamina'] });
+    expect(result.interpretation).toMatchObject({
+      source: 'ai',
+      summary: 'Melamina',
+      material: { label: 'Melamina' },
+    });
+  });
 });

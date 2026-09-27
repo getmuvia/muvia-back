@@ -67,16 +67,70 @@ export class EmbeddingService {
 
   /**
    * Combines product fields into searchable text.
-   * Order: title, description, keywords (most to least important).
+   * Structured catalog data is included so semantic retrieval does not depend
+   * on sellers repeating category and material terms in free-form copy.
    */
   private buildSearchableText(product: Partial<Product>): string {
-    const parts: string[] = [];
+    const parts = [
+      this.field('Title', product.title),
+      this.field(
+        'Category',
+        product.category
+          ? [product.category.name, product.category.code]
+              .filter(Boolean)
+              .join(' ')
+          : undefined,
+      ),
+      this.field(
+        'Specifications',
+        this.flattenSpecifications(product.specifications),
+      ),
+      this.field('Keywords', product.keywords?.join(', ')),
+      this.field('Description', product.description),
+    ];
 
-    if (product.title) parts.push(product.title);
-    if (product.description) parts.push(product.description);
-    if (product.keywords?.length) parts.push(product.keywords.join(' '));
+    return parts.filter((part): part is string => Boolean(part)).join('. ');
+  }
 
-    return parts.join('. ');
+  private field(
+    label: string,
+    value: string | null | undefined,
+  ): string | undefined {
+    if (value === undefined || value === null) return undefined;
+    const text = value.trim();
+    return text ? `${label}: ${text}` : undefined;
+  }
+
+  private flattenSpecifications(
+    specifications: Product['specifications'] | undefined,
+  ): string | undefined {
+    if (!specifications) return undefined;
+
+    const values = this.flattenValue(specifications);
+    return values.length ? values.join('; ') : undefined;
+  }
+
+  private flattenValue(value: unknown, path = ''): string[] {
+    if (value === undefined || value === null || value === '') return [];
+    if (Array.isArray(value)) {
+      return value.flatMap((item) => this.flattenValue(item, path));
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value).flatMap(([key, nestedValue]) =>
+        this.flattenValue(nestedValue, path ? `${path}.${key}` : key),
+      );
+    }
+
+    if (
+      typeof value !== 'string' &&
+      typeof value !== 'number' &&
+      typeof value !== 'boolean' &&
+      typeof value !== 'bigint'
+    ) {
+      return [];
+    }
+
+    return [`${path ? `${path}: ` : ''}${String(value)}`];
   }
 
   private async generateEmbeddingString(text: string): Promise<string | null> {

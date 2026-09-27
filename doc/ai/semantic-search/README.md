@@ -277,7 +277,8 @@ Performs batch semantic search on products.
 
 ### POST `/ai/embeddings/regenerate`
 
-Regenerates embeddings that are missing or were produced by another model.
+Regenerates embeddings that are missing, were produced by another model or use
+an older product-document content version.
 Requires authentication.
 
 **Response:**
@@ -316,13 +317,15 @@ match `GCP_EMBEDDING_MODEL`.
 
 For production rollout:
 
-1. Run the database migration that adds `products.embedding_model`.
+1. Run the database migrations that add `products.embedding_model` and
+   `products.embedding_content_version`.
 2. Set `GCP_EMBEDDING_LOCATION=us-central1` and
    `GCP_EMBEDDING_MODEL=gemini-embedding-001` in the production environment.
 3. Deploy the backend.
-4. Call `POST /ai/embeddings/regenerate` once to refresh missing and outdated
-   product vectors. Until regeneration finishes, products with legacy vectors are
-   safely excluded from semantic results rather than compared across model spaces.
+4. Call `POST /ai/embeddings/regenerate` once to refresh missing,
+   model-incompatible and content-outdated product vectors. Vectors from another
+   model are safely excluded; older content versions remain searchable while
+   regeneration finishes.
 
 ### Authentication
 

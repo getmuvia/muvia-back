@@ -27,20 +27,23 @@ navigation search modal use the same response contract.
   taxonomy tables. Sofa/couch aliases are separate from office chairs; Muebles is too
   broad to establish product identity. Language-specific stop words and identity phrases
   live in small locale resource files under common/search/locales.
-- Queries without a recognized type need textual support: at least half of their
-  meaningful words in the title or keywords, or all in the description. Semantically
-  similar products without that support can only appear as related suggestions.
-- Eligible main results use text relevance (75%) and vector similarity (25%) when
-  embeddings are available. Text-only candidates keep their lexical score. Text
-  coverage weights are title 65%, keywords 20%, description 15%, with phrase and
-  completeness bonuses capped at 1. Similarity is a ranking score, not a probability.
+- Queries without a recognized type use textual support when it exists, but a
+  semantic-only candidate with similarity >= 0.45 can also be a main result. This
+  permits regional vocabulary such as placard/armario without maintaining every
+  expression as a static alias. Candidates between the retrieval threshold and the
+  main-result threshold remain related suggestions.
+- Text-only candidates keep their lexical score and semantic-only candidates keep
+  their cosine similarity. Candidates found by both paths use text relevance (75%)
+  and vector similarity (25%). Text coverage weights are title 65%, keywords 20%,
+  description 15%, with phrase and completeness bonuses capped at 1. Similarity is
+  a ranking score, not a probability.
 - When a query names a supported material, products made from that material rank
   first, products combining it with other materials rank second, and same-type
   products without it become fallback suggestions. Structured `specifications.material`
   participates in retrieval and ranking instead of relying only on descriptions.
 - Fallback suggestions are returned only when direct matches do not fill the requested
   limit. They remain separate from the main results so clients can label them honestly.
-- Related suggestions need similarity >= 0.45 and, for a recognized type, an explicitly
+- Related suggestions need similarity >= 0.30 and, for a recognized type, an explicitly
   compatible type. Sofas can suggest armchairs/divans, but not office chairs. Suggestions
   never duplicate main results and are capped at six (or the requested limit if smaller).
 - AI failure falls back to text retrieval. Text retrieval failure returns an error so
@@ -79,6 +82,11 @@ The query accepts 2–200 characters after trimming; limit accepts 1–50. marke
 restricts both lexical and vector candidates to an active product listing in that market.
 The service retrieves up to three times the requested limit per retrieval method.
 
+Product document embeddings contain title, category name/code, structured
+specifications, keywords and description. `embedding_content_version` lets the
+regeneration endpoint refresh vectors after that document format changes without
+making old vectors unavailable during rollout.
+
 ## Frontend and rollout
 
 The catalog renders main matches first and `relatedResults` under
@@ -104,6 +112,8 @@ for its text filter. POST /ai/search remains a semantic batch endpoint.
 - quiero una silla de madera: wooden chairs first, mixed/partial wooden chairs next,
   and other chairs only as separately labeled fallback suggestions.
 - Product without an embedding: still eligible through normalized text/keywords.
+- placard de tablero melaminico: a sufficiently similar Armario de melamina can be
+  a main semantic result without a literal placard match.
 - Empty results, AI outage, request errors, rapid query changes and clearing the search:
   preserve group boundaries and show an honest empty/error state.
 
