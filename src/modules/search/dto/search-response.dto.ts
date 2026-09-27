@@ -12,7 +12,7 @@ export interface SearchInterpretationDto {
     label: string;
   };
   material?: {
-    code: string;
+    code?: string;
     label: string;
   };
   measurement?: {

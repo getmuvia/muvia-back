@@ -44,12 +44,12 @@ export class SearchRankingService {
     const relatedResults: RankedHybridProduct[] = [];
 
     for (const { product, result, similarity } of candidates.values()) {
-      const relevance = this.evaluateProduct(product, intent);
-      result.score =
-        similarity === undefined
-          ? relevance.score
-          : relevance.score * (1 - SEARCH.SEMANTIC_RANK_WEIGHT) +
-            similarity * SEARCH.SEMANTIC_RANK_WEIGHT;
+      const relevance = this.evaluateProduct(product, intent, similarity);
+      result.score = this.scoreCandidate(
+        relevance.score,
+        similarity,
+        result.matchType,
+      );
 
       if (relevance.primary) {
         results.push({
@@ -61,7 +61,7 @@ export class SearchRankingService {
       } else if (
         relevance.relatedType &&
         similarity !== undefined &&
-        similarity >= SEARCH.RELATED_SIMILARITY_THRESHOLD
+        similarity >= SEARCH.SEMANTIC_RELATED_THRESHOLD
       ) {
         relatedResults.push({ result, priority: 0 });
       }
@@ -150,6 +150,7 @@ export class SearchRankingService {
   private evaluateProduct(
     product: SearchableProduct,
     intent: SearchIntent,
+    similarity?: number,
   ): ProductRelevance {
     const title = normalizeSearchText(product.title);
     const structuredMaterial = product.specifications?.material ?? '';
@@ -191,22 +192,29 @@ export class SearchRankingService {
         )
       );
     });
-    const identityMatches = intent.categoryCode
+    const lexicalIdentityMatches = intent.categoryCode
       ? categoryInIdentity || categoryInDescription
       : intent.terms.length === 0
         ? intent.measurement !== undefined
         : titleCoverage >= 0.5 ||
           keywordCoverage >= 0.5 ||
           descriptionCoverage === 1;
+    const semanticIdentityMatches = Boolean(
+      !intent.categoryCode &&
+      similarity !== undefined &&
+      similarity >= SEARCH.SEMANTIC_PRIMARY_THRESHOLD,
+    );
+    const identityMatches = lexicalIdentityMatches || semanticIdentityMatches;
     const materialMatch = classifyMaterialMatch(
       structuredMaterial,
       `${title} ${keywords} ${description}`,
       intent.material,
     );
+    const hasCanonicalMaterial = intent.material?.code !== undefined;
     const primary =
-      identityMatches && (!intent.material || materialMatch !== 'none');
+      identityMatches && (!hasCanonicalMaterial || materialMatch !== 'none');
     const fallback = Boolean(
-      identityMatches && intent.material && materialMatch === 'none',
+      identityMatches && hasCanonicalMaterial && materialMatch === 'none',
     );
     const relatedType =
       !fallback &&
@@ -233,6 +241,20 @@ export class SearchRankingService {
       materialMatch,
       score: Math.min(score, 1),
     };
+  }
+
+  private scoreCandidate(
+    lexicalScore: number,
+    similarity: number | undefined,
+    matchType: HybridProductResult['matchType'],
+  ): number {
+    if (similarity === undefined) return lexicalScore;
+    if (matchType === 'semantic') return similarity;
+
+    return (
+      lexicalScore * (1 - SEARCH.SEMANTIC_RANK_WEIGHT) +
+      similarity * SEARCH.SEMANTIC_RANK_WEIGHT
+    );
   }
 
   private namedCategory(

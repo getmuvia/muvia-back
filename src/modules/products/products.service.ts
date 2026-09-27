@@ -387,7 +387,13 @@ export class ProductsService {
   }
 
   private shouldRegenerateEmbedding(dto: UpdateProductDto): boolean {
-    return !!(dto.title || dto.description || dto.keywords);
+    return [
+      'title',
+      'description',
+      'keywords',
+      'specifications',
+      'categoryId',
+    ].some((field) => Object.prototype.hasOwnProperty.call(dto, field));
   }
 
   private createBaseQuery(marketCode: string) {

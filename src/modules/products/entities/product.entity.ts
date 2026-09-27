@@ -1,11 +1,11 @@
 import {
-    Entity,
-    PrimaryGeneratedColumn,
-    Column,
-    CreateDateColumn,
-    ManyToOne,
-    OneToMany,
-    JoinColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  ManyToOne,
+  OneToMany,
+  JoinColumn,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
@@ -13,75 +13,92 @@ import { ProductAsset } from './product-asset.entity';
 import { ProductListing } from './product-listing.entity';
 
 export interface ProductSpecifications {
-    weight?: string;
-    dimensions?: {
-        width: number;
-        height: number;
-        depth: number;
-        unit: string;
-    };
-    material?: string;
-    color?: string;
-    [key: string]: unknown;
+  weight?: string;
+  dimensions?: {
+    width: number;
+    height: number;
+    depth: number;
+    unit: string;
+  };
+  material?: string;
+  color?: string;
+  [key: string]: unknown;
 }
 
 @Entity('products')
 export class Product {
-    @PrimaryGeneratedColumn('uuid')
-    id: string;
+  @PrimaryGeneratedColumn('uuid')
+  id: string;
 
-    @Column({ name: 'seller_id' })
-    sellerId: string;
+  @Column({ name: 'seller_id' })
+  sellerId: string;
 
-    @Column({ name: 'category_id', nullable: true })
-    categoryId: string;
+  @Column({ name: 'category_id', nullable: true })
+  categoryId: string;
 
-    @Column()
-    title: string;
+  @Column()
+  title: string;
 
-    @Column('text', { nullable: true })
-    description: string;
+  @Column('text', { nullable: true })
+  description: string;
 
-    @Column('decimal', { precision: 10, scale: 2 })
-    price: number;
+  @Column('decimal', { precision: 10, scale: 2 })
+  price: number;
 
-    @Column({ default: 0 })
-    stock: number;
+  @Column({ default: 0 })
+  stock: number;
 
-    @Column({ type: 'jsonb', nullable: true })
-    specifications: ProductSpecifications;
+  @Column({ type: 'jsonb', nullable: true })
+  specifications: ProductSpecifications;
 
-    @Column('text', { array: true, default: '{}' })
-    keywords: string[];
+  @Column('text', { array: true, default: '{}' })
+  keywords: string[];
 
-    /**
-     * Normalized vector embedding for semantic search (768 dimensions).
-     * Requires pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
-     */
-    @Column('vector', { length: 768, nullable: true, select: false })
-    embedding: string;
+  /**
+   * Normalized vector embedding for semantic search (768 dimensions).
+   * Requires pgvector extension: CREATE EXTENSION IF NOT EXISTS vector;
+   */
+  @Column('vector', { length: 768, nullable: true, select: false })
+  embedding: string;
 
-    /** Model that generated the stored vector. Prevents mixing incompatible spaces. */
-    @Column({ name: 'embedding_model', type: 'varchar', length: 100, nullable: true, select: false })
-    embeddingModel: string;
+  /** Model that generated the stored vector. Prevents mixing incompatible spaces. */
+  @Column({
+    name: 'embedding_model',
+    type: 'varchar',
+    length: 100,
+    nullable: true,
+    select: false,
+  })
+  embeddingModel: string;
 
-    @CreateDateColumn()
-    createdAt: Date;
+  /** Version of the product fields included in the stored vector. */
+  @Column({
+    name: 'embedding_content_version',
+    type: 'smallint',
+    nullable: true,
+    select: false,
+  })
+  embeddingContentVersion: number;
 
-    @ManyToOne(() => User, (user) => user.products, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'seller_id' })
-    seller: User;
+  @CreateDateColumn()
+  createdAt: Date;
 
-    @ManyToOne(() => Category, (category) => category.products, {
-        onDelete: 'SET NULL',
-        nullable: true,
-    })
-    @JoinColumn({ name: 'category_id' })
-    category: Category;
+  @ManyToOne(() => User, (user) => user.products, { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'seller_id' })
+  seller: User;
 
-    @OneToMany(() => ProductAsset, (asset) => asset.product, { cascade: true })
-    assets: ProductAsset[];
+  @ManyToOne(() => Category, (category) => category.products, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
+  @JoinColumn({ name: 'category_id' })
+  category: Category;
 
-    @OneToMany(() => ProductListing, (listing) => listing.product, { cascade: true })
-    listings: ProductListing[];
+  @OneToMany(() => ProductAsset, (asset) => asset.product, { cascade: true })
+  assets: ProductAsset[];
+
+  @OneToMany(() => ProductListing, (listing) => listing.product, {
+    cascade: true,
+  })
+  listings: ProductListing[];
 }

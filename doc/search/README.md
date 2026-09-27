@@ -28,8 +28,8 @@ The module does not own an entity. A search is an operation over existing
 - `SearchService` orchestrates market validation, intent resolution, parallel
   lexical/vector retrieval and result selection.
 - `SearchIntentService` combines deterministic taxonomy rules with the optional
-  AI candidate, validates inferred category/material/measurement data and builds
-  the user-facing interpretation.
+  AI candidate, validates inferred category and measurement data, preserves new
+  material vocabulary and builds the user-facing interpretation.
 - `SearchRankingService` evaluates product identity, material relevance and
   semantic evidence without calling external services.
 - `GeminiSearchIntentProvider` is the adapter behind
@@ -55,12 +55,47 @@ POST /ai/hybrid
     -> response with interpretation, results and relatedResults
 ```
 
-AI does not replace deterministic behavior. Explicit taxonomy, material and
-measurement parsing has priority. Gemini can fill missing intent fields, but its
-category must resolve through the stored Muvia taxonomy and its material must
-resolve through the supported material families. If the model is disabled,
-unconfigured, times out or returns invalid JSON, the request continues with the
-deterministic intent.
+AI does not replace deterministic behavior. Explicit taxonomy and measurement
+parsing has priority. Gemini can fill missing intent fields. Categories use the
+stored Muvia taxonomy when they resolve; material expressions that do not belong
+to a known family are preserved instead of discarded, so lexical and semantic
+retrieval can still use them. If the model is disabled, unconfigured, times out
+or returns invalid JSON, the request continues with the deterministic intent.
+
+## Semantic retrieval
+
+Product embeddings are built from title, category name/code, structured
+specifications, keywords and description. This prevents semantic recall from
+depending on a seller repeating material or category information in free-form
+copy.
+
+The hybrid ranker treats retrieval methods as complementary:
+
+- lexical evidence remains strongest for exact names, brands and model terms;
+- a semantic-only candidate with similarity `>= 0.45` can be a main result even
+  when regional wording does not occur literally in the product;
+- lower semantic candidates remain separate related suggestions;
+- known structured category and material constraints are still enforced;
+- an unknown AI material is evidence for retrieval, not a hard exclusion rule.
+
+Pure semantic candidates retain their cosine similarity as their score. Only
+candidates found by both retrieval paths blend lexical relevance and semantic
+similarity.
+
+### Embedding content versions
+
+`products.embedding_content_version` identifies which product document format
+produced a vector. Version 2 includes category and specifications. Existing
+vectors remain available during deployment, but the regeneration endpoint
+selects older or unversioned rows for refresh:
+
+```text
+POST /ai/embeddings/regenerate
+```
+
+Run the database migration before calling the endpoint. Product updates also
+regenerate the vector when title, description, keywords, category or
+specifications change.
 
 ## API
 
@@ -143,9 +178,12 @@ Unit tests live under `src/modules/search/tests/` and mirror production folders.
 The focused suite covers:
 
 - AI enrichment and deterministic fallback;
+- preservation of previously unknown material vocabulary;
 - preservation of hybrid material ranking;
+- primary and related semantic-only regional matches;
+- category and specifications in the product embedding document;
 - the Gemini structured-output request contract;
-- vector model and measurement filtering.
+- vector model, content version and measurement filtering.
 
 Broader integration and end-to-end coverage can be added without changing the
 module API.

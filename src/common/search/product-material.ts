@@ -3,7 +3,7 @@ import { containsSearchPhrase, normalizeSearchText } from './search-text';
 export type MaterialMatchLevel = 'full' | 'partial' | 'none';
 
 export interface MaterialSearchIntent {
-  code: string;
+  code?: string;
   aliases: readonly string[];
 }
 
@@ -74,6 +74,20 @@ export function detectMaterialSearchIntent(
   );
 }
 
+/**
+ * Preserves materials understood by the intent provider even when Muvia does
+ * not have a canonical family for them yet. Unknown vocabulary remains useful
+ * for lexical and semantic retrieval instead of being discarded.
+ */
+export function resolveMaterialSearchIntent(
+  value: string,
+): MaterialSearchIntent | undefined {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return undefined;
+
+  return detectMaterialSearchIntent(normalized) ?? { aliases: [normalized] };
+}
+
 export function classifyMaterialMatch(
   structuredMaterial: string | null | undefined,
   productText: string,
@@ -107,7 +121,12 @@ function includesAnyAlias(text: string, aliases: readonly string[]): boolean {
   return aliases.some((alias) => containsSearchPhrase(text, alias));
 }
 
-function includesOtherMaterial(text: string, targetCode: string): boolean {
+function includesOtherMaterial(
+  text: string,
+  targetCode: string | undefined,
+): boolean {
+  if (!targetCode) return false;
+
   return MATERIAL_FAMILIES.some(
     (family) =>
       family.code !== targetCode && includesAnyAlias(text, family.aliases),
