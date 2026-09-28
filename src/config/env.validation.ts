@@ -18,6 +18,7 @@ export const envValidationSchema = Joi.object({
   JWT_EXPIRATION: Joi.string().default('24h'),
   JWT_ISSUER: Joi.string().default('muvia-api'),
   JWT_AUDIENCE: Joi.string().default('muvia-client'),
+  PUBLIC_REGISTRATION_ENABLED: Joi.boolean().default(false),
 
   GOOGLE_STORAGE_BUCKET: Joi.string().when('NODE_ENV', {
     is: 'production',

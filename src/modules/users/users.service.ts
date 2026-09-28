@@ -37,7 +37,8 @@ export class UsersService {
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
-    await this.validateEmailNotExists(createUserDto.email);
+    const email = createUserDto.email.trim().toLowerCase();
+    await this.validateEmailNotExists(email);
     this.validateVendorProfile(createUserDto);
 
     const passwordHash = await this.passwordService.hash(
@@ -45,7 +46,7 @@ export class UsersService {
     );
 
     const user = this.userRepository.create({
-      email: createUserDto.email,
+      email,
       passwordHash,
       role: createUserDto.role,
     });

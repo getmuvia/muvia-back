@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
 import { PasswordService } from '../../common/services/password.service';
 import { LoginDto } from './dto/login.dto';
@@ -21,9 +26,21 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly passwordService: PasswordService,
     private readonly tokenService: TokenService,
+    private readonly configService: ConfigService,
   ) {}
 
   async register(registerDto: RegisterDto): Promise<AuthResponse> {
+    if (
+      !this.configService.get<boolean>('PUBLIC_REGISTRATION_ENABLED', false)
+    ) {
+      throw new ForbiddenException(
+        createErrorPayload(
+          ERROR_CODES.REGISTRATION_CLOSED,
+          'El registro público está cerrado por ahora.',
+        ),
+      );
+    }
+
     const user = await this.usersService.create({
       ...registerDto,
       email: this.normalizeEmail(registerDto.email),

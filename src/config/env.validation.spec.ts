@@ -10,6 +10,25 @@ const baseEnvironment = {
 };
 
 describe('envValidationSchema AI configuration', () => {
+  it('disables public registration by default', () => {
+    const result = envValidationSchema.validate(baseEnvironment);
+    const value = result.value as Record<string, unknown>;
+
+    expect(result.error).toBeUndefined();
+    expect(value.PUBLIC_REGISTRATION_ENABLED).toBe(false);
+  });
+
+  it('accepts an explicit public registration setting', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      PUBLIC_REGISTRATION_ENABLED: 'true',
+    });
+    const value = result.value as Record<string, unknown>;
+
+    expect(result.error).toBeUndefined();
+    expect(value.PUBLIC_REGISTRATION_ENABLED).toBe(true);
+  });
+
   it('uses the HU2 Gemini model and supported global location by default', () => {
     expect(AI_DEVELOPMENT_DEFAULTS.visionModel).toBe('gemini-3.5-flash-lite');
     expect(AI_DEVELOPMENT_DEFAULTS.visionLocation).toBe('global');
@@ -26,12 +45,13 @@ describe('envValidationSchema AI configuration', () => {
   });
 
   it('applies the centralized defaults outside production', () => {
-    const { error, value } = envValidationSchema.validate({
+    const result = envValidationSchema.validate({
       ...baseEnvironment,
       NODE_ENV: 'development',
     });
+    const value = result.value as Record<string, unknown>;
 
-    expect(error).toBeUndefined();
+    expect(result.error).toBeUndefined();
     expect(value).toMatchObject({
       GCP_LOCATION: AI_DEVELOPMENT_DEFAULTS.visionLocation,
       GCP_GEMINI_MODEL: AI_DEVELOPMENT_DEFAULTS.visionModel,
@@ -56,13 +76,14 @@ describe('envValidationSchema AI configuration', () => {
       GCP_SEARCH_INTENT_MODEL: 'custom-search-intent-model',
     };
 
-    const { error, value } = envValidationSchema.validate({
+    const result = envValidationSchema.validate({
       ...baseEnvironment,
       NODE_ENV: 'test',
       ...explicitConfiguration,
     });
+    const value = result.value as Record<string, unknown>;
 
-    expect(error).toBeUndefined();
+    expect(result.error).toBeUndefined();
     expect(value).toMatchObject(explicitConfiguration);
   });
 
