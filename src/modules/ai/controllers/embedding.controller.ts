@@ -7,22 +7,22 @@ import { UserRole } from '../../../common/enums/user-role.enum';
 
 /**
  * Admin controller for embedding management operations.
- * Requires authentication and vendor role.
+ * Requires authentication and the admin role.
  */
 @Controller('ai/embeddings')
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class EmbeddingController {
-    constructor(private readonly embeddingService: EmbeddingService) { }
+  constructor(private readonly embeddingService: EmbeddingService) {}
 
-    /**
-     * Regenerates embeddings that are missing or use an outdated model.
-     * Use after enabling semantic search, changing models, or updating product data.
-     *
-     * @returns Count of updated and failed products
-     */
-    @Post('regenerate')
-    @Roles(UserRole.VENDOR)
-    regenerate(): Promise<{ updated: number; failed: number }> {
-        return this.embeddingService.regenerateAll();
-    }
+  /**
+   * Regenerates embeddings that are missing or use an outdated model.
+   * Use after enabling semantic search, changing models, or updating product data.
+   *
+   * @returns Count of updated and failed products
+   */
+  @Post('regenerate')
+  @Roles(UserRole.ADMIN)
+  regenerate(): Promise<{ updated: number; failed: number }> {
+    return this.embeddingService.regenerateAll();
+  }
 }

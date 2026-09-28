@@ -93,6 +93,8 @@ selects older or unversioned rows for refresh:
 POST /ai/embeddings/regenerate
 ```
 
+This catalog-wide maintenance endpoint requires an authenticated admin account.
+
 Run the database migration before calling the endpoint. Product updates also
 regenerate the vector when title, description, keywords, category or
 specifications change.

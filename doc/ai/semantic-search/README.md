@@ -279,7 +279,8 @@ Performs batch semantic search on products.
 
 Regenerates embeddings that are missing, were produced by another model or use
 an older product-document content version.
-Requires authentication.
+Requires authentication with the admin role. Vendor accounts cannot trigger
+catalog-wide regeneration.
 
 **Response:**
 

@@ -9,11 +9,15 @@ import {
   ValidateNested,
   ValidateIf,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Transform, TransformFnParams, Type } from 'class-transformer';
 import { UserRole } from '../interfaces/user-role';
 import { CreateVendorProfileDto } from './create-vendor-profile.dto';
 
 export class CreateUserDto {
+  @Transform(({ value }: TransformFnParams) => {
+    const email: unknown = value;
+    return typeof email === 'string' ? email.trim().toLowerCase() : email;
+  })
   @IsEmail({}, { message: 'Please provide a valid email address' })
   @IsNotEmpty({ message: 'Email is required' })
   email: string;
@@ -26,11 +30,13 @@ export class CreateUserDto {
   })
   password: string;
 
-  @IsEnum(UserRole, { message: 'Invalid role. Must be admin, vendor, or consumer' })
+  @IsEnum(UserRole, {
+    message: 'Invalid role. Must be admin, vendor, or consumer',
+  })
   @IsNotEmpty({ message: 'Role is required' })
   role: UserRole;
 
-  @ValidateIf((o) => o.role === UserRole.VENDOR)
+  @ValidateIf((user: CreateUserDto) => user.role === UserRole.VENDOR)
   @IsNotEmpty({ message: 'Vendor profile is required for vendor role' })
   @ValidateNested()
   @Type(() => CreateVendorProfileDto)

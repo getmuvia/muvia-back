@@ -2,7 +2,7 @@
 
 ## Overview
 
-The authentication module is responsible for public account registration, credential validation, access-token creation, and validation of authenticated requests. User profile management remains in the users module.
+The authentication module is responsible for controlled account registration, credential validation, access-token creation, and validation of authenticated requests. User profile management remains in the users module.
 
 This refactor separates transport contracts, response models, mapping, and token concerns so that `AuthService` only coordinates authentication use cases.
 
@@ -35,7 +35,7 @@ src/modules/auth/
 
 | Component | Responsibility |
 |---|---|
-| `AuthController` | Exposes the public register and login endpoints |
+| `AuthController` | Exposes the register and login endpoints |
 | `RegisterDto` and `LoginDto` | Validate and normalize incoming data |
 | `AuthService` | Coordinates registration and credential validation |
 | `TokenService` | Creates signed access tokens |
@@ -49,7 +49,7 @@ src/modules/auth/
 
 `POST /auth/register`
 
-Public registration supports only `consumer` and `vendor`. Administrative users must be created through an authorized administrative flow.
+Public registration is disabled by default. While `PUBLIC_REGISTRATION_ENABLED=false`, this endpoint returns HTTP 403 with code `REGISTRATION_CLOSED` before creating an account. The route remains unauthenticated so it can be enabled through deployment configuration without changing the API contract. When enabled, it supports only `consumer` and `vendor`; it never creates an admin account.
 
 Consumer example:
 
@@ -63,6 +63,10 @@ Consumer example:
 
 Vendor registration also requires `vendorProfile`, following the existing vendor profile contract.
 
+While registration is closed, an authenticated admin creates accounts through `POST /users`, supplying the same email, password, and role fields (plus `vendorProfile` for vendors). This endpoint may create `admin`, `consumer`, or `vendor` accounts and returns the created user, not an access token. The new user then signs in through `POST /auth/login`.
+
+`POST /categories` and `POST /ai/embeddings/regenerate` are also admin-only operations. Public category reads and buyer search are unaffected.
+
 ### Login
 
 `POST /auth/login`
@@ -74,7 +78,7 @@ Vendor registration also requires `vendorProfile`, following the existing vendor
 }
 ```
 
-Both endpoints return the same response shape:
+When public registration is enabled, registration and login return the same response shape:
 
 ```json
 {
@@ -114,9 +118,13 @@ The former `GET /auth/check-status` endpoint was removed. It issued a new access
 
 `RegisterDto` accepts only `consumer` and `vendor`. The broader `CreateUserDto` remains available to the admin-protected users flow, but it is no longer exposed directly by public registration.
 
+### Registration gate
+
+The server checks `PUBLIC_REGISTRATION_ENABLED` in `AuthService` before any user is persisted. Its validated default is `false`, so omitting the variable also closes registration. The frontend hiding a registration page is not a security boundary. Terraform controls the Cloud Run value; changing it requires `terraform apply` but no database migration or new admin endpoint.
+
 ### Email normalization
 
-Login and public registration trim and lowercase email addresses before lookup or persistence. This reduces duplicate accounts and inconsistent login behavior caused by casing or surrounding whitespace.
+Login, public registration, and admin-created users trim and lowercase email addresses before lookup or persistence. The admin create DTO normalizes before validation, and `UsersService.create` normalizes before the uniqueness lookup and save. This reduces duplicate accounts and inconsistent login behavior caused by casing or surrounding whitespace.
 
 Existing mixed-case email records should be normalized with a controlled data migration before deployment if the database already contains production users.
 
@@ -138,6 +146,7 @@ The shared `AuthenticatedUser` interface replaces `any` in authenticated control
 | `JWT_EXPIRATION` | No | `24h` | Access-token lifetime |
 | `JWT_ISSUER` | No | `muvia-api` | Token issuer checked during validation |
 | `JWT_AUDIENCE` | No | `muvia-client` | Token audience checked during validation |
+| `PUBLIC_REGISTRATION_ENABLED` | No | `false` | Allows public `consumer` and `vendor` registration when explicitly enabled |
 
 Token creation and validation consume the same centralized configuration from `auth.config.ts`.
 
@@ -158,4 +167,4 @@ The following improvements require broader persistence or infrastructure decisio
 - rate limiting for login and registration, ideally backed by shared storage in multi-instance deployments;
 - transactional creation of users and vendor profiles in the users module;
 - case-insensitive database uniqueness for normalized email addresses;
-- focused unit and integration coverage for authentication flows.
+- broader integration coverage for authentication flows.
