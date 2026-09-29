@@ -10,6 +10,7 @@ import { EntityManager, Repository, In, SelectQueryBuilder } from 'typeorm';
 import type { QueryDeepPartialEntity } from 'typeorm/query-builder/QueryPartialEntity';
 import { Product } from './entities/product.entity';
 import { ProductAsset } from './entities/product-asset.entity';
+import { AssetType } from './enums/asset-type.enum';
 import type { AssetMetadata } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
@@ -27,6 +28,8 @@ import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { Category } from '../categories/entities/category.entity';
 import { MarketsService } from '../markets/markets.service';
 import { Market } from '../markets/entities/market.entity';
+import { FilesService } from '../files/files.service';
+import { FileUploadPurpose } from '../files/file-upload-policy';
 import {
   ProductDimension,
   VALID_PRODUCT_DIMENSION_PATTERN,
@@ -49,10 +52,12 @@ export class ProductsService {
     private readonly assetRepository: Repository<ProductAsset>,
     private readonly embeddingService: EmbeddingService,
     private readonly marketsService: MarketsService,
+    private readonly filesService: FilesService,
   ) {}
 
   async create(sellerId: string, dto: CreateProductDto): Promise<Product> {
     const { assets, ...productData } = dto;
+    await this.verifyProductAssets(sellerId, assets ?? []);
 
     const savedProduct = await this.productRepository.manager.transaction(
       async (manager) => {
@@ -160,6 +165,14 @@ export class ProductsService {
     dto: UpdateProductDto,
   ): Promise<Product> {
     const { assets, ...productData } = dto;
+    if (assets !== undefined) {
+      const product = await this.requireProduct(id, this.productRepository);
+      this.validateOwnership(product, sellerId);
+      const existing = await this.assetRepository.find({
+        where: { productId: id },
+      });
+      await this.verifyProductAssets(sellerId, assets, existing);
+    }
 
     const updatedProduct = await this.productRepository.manager.transaction(
       async (manager) => {
@@ -284,6 +297,7 @@ export class ProductsService {
   ): Promise<ProductAsset> {
     const product = await this.findOne(productId);
     this.validateOwnership(product, sellerId);
+    await this.verifyProductAssets(sellerId, [assetDto]);
 
     const asset = this.assetRepository.create({ ...assetDto, productId });
     return this.assetRepository.save(asset);
@@ -333,6 +347,13 @@ export class ProductsService {
           `Asset with ID ${assetId} not found`,
         ),
       );
+    }
+
+    if (
+      (dto.url && dto.url !== asset.url) ||
+      (dto.type && dto.type !== asset.type)
+    ) {
+      await this.verifyProductAssets(sellerId, [{ ...asset, ...dto }]);
     }
 
     Object.assign(asset, dto);
@@ -425,6 +446,30 @@ export class ProductsService {
     );
 
     return assetRepository.save(assetEntities);
+  }
+
+  private async verifyProductAssets(
+    sellerId: string,
+    assets: (CreateProductAssetDto | SyncProductAssetDto)[],
+    existing: ProductAsset[] = [],
+  ): Promise<void> {
+    await Promise.all(
+      assets.map(async (asset) => {
+        const previous =
+          'id' in asset
+            ? existing.find((item) => item.id === asset.id)
+            : undefined;
+        const type = asset.type ?? previous?.type ?? AssetType.IMAGE;
+        if (previous?.url === asset.url && previous.type === type) return;
+        await this.filesService.verifyAssetReference(
+          sellerId,
+          asset.url,
+          type === AssetType.MODEL_3D
+            ? FileUploadPurpose.PRODUCT_MODEL
+            : FileUploadPurpose.PRODUCT_IMAGE,
+        );
+      }),
+    );
   }
 
   private validateOwnership(product: Product, sellerId: string): void {

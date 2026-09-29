@@ -1,116 +1,92 @@
-import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Storage, Bucket } from '@google-cloud/storage';
-import { v4 as uuidv4 } from 'uuid';
-import type { StorageProvider, UploadOptions, UploadResult } from '../interfaces/storage-provider.interface';
+import { Bucket, Storage } from '@google-cloud/storage';
+import type {
+  SignedUploadPolicy,
+  StoredObjectMetadata,
+  StorageProvider,
+} from '../interfaces/storage-provider.interface';
 
-const ALLOWED_MIME_TYPES = [
-    'image/jpeg',
-    'image/jpg',
-    'image/png',
-    'image/webp',
-
-    'model/gltf-binary',
-    'model/gltf+json',
-    'model/vnd.usdz+zip'
-];
+const UPLOAD_URL_TTL_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class GoogleCloudStorageProvider implements StorageProvider {
-    private readonly logger = new Logger(GoogleCloudStorageProvider.name);
-    private readonly storage: Storage;
-    private readonly bucket: Bucket;
-    private readonly bucketName: string;
+  private readonly logger = new Logger(GoogleCloudStorageProvider.name);
+  private readonly bucket: Bucket;
+  private readonly bucketName: string;
 
-    constructor(private readonly configService: ConfigService) {
-        this.bucketName = this.configService.get<string>('GOOGLE_STORAGE_BUCKET')!;
+  constructor(configService: ConfigService) {
+    this.bucketName = configService.getOrThrow<string>('GOOGLE_STORAGE_BUCKET');
+    this.bucket = new Storage().bucket(this.bucketName);
+  }
 
-        if (!this.bucketName) {
-            throw new Error('GOOGLE_STORAGE_BUCKET is not configured');
-        }
+  async createUploadPolicy(
+    key: string,
+    contentType: string,
+    maxBytes: number,
+  ): Promise<SignedUploadPolicy> {
+    const [policy] = await this.bucket.file(key).generateSignedPostPolicyV4({
+      expires: Date.now() + UPLOAD_URL_TTL_MS,
+      fields: {
+        'Content-Type': contentType,
+        'Content-Disposition': 'attachment',
+      },
+      conditions: [['content-length-range', 1, maxBytes]],
+    });
+    return { url: policy.url, fields: policy.fields, key };
+  }
 
-        this.storage = new Storage();
-        this.bucket = this.storage.bucket(this.bucketName);
+  async getMetadata(key: string): Promise<StoredObjectMetadata | null> {
+    try {
+      const [metadata] = await this.bucket.file(key).getMetadata();
+      return {
+        size: Number(metadata.size),
+        contentType: metadata.contentType ?? '',
+        generation: String(metadata.generation ?? ''),
+      };
+    } catch (error) {
+      if ((error as { code?: number }).code === 404) return null;
+      throw error;
     }
+  }
 
-    async upload(file: Express.Multer.File, options?: UploadOptions): Promise<UploadResult> {
-        const extension = file.originalname.split('.').pop() || '';
-        const filename = options?.filename || `${uuidv4()}.${extension}`;
-
-        const filePath = options?.folder ? `${options.folder}/${filename}` : filename;
-
-        const fileRef = this.bucket.file(filePath);
-
-        await fileRef.save(file.buffer, {
-            contentType: file.mimetype,
-            resumable: false,
-            metadata: {
-                originalName: file.originalname,
-            }
-        });
-
-        this.logger.log(`File uploaded to GCS: ${filePath}`);
-
-        const publicUrl = `https://storage.googleapis.com/${this.bucketName}/${filePath}`;
-
-        return {
-            url: publicUrl,
-            key: filePath,
-            size: file.size,
-            contentType: file.mimetype,
-        };
+  async getHeader(key: string, generation: string): Promise<Buffer | null> {
+    try {
+      const [header] = await this.bucket.file(key, { generation }).download({
+        start: 0,
+        end: 31,
+      });
+      return header;
+    } catch (error) {
+      if ((error as { code?: number }).code === 404) return null;
+      throw error;
     }
+  }
 
-    async delete(fileKey: string): Promise<void> {
-        try {
-            const fileRef = this.bucket.file(fileKey);
-            await fileRef.delete({ ignoreNotFound: true });
-            this.logger.log(`File deleted from GCS: ${fileKey}`);
-        } catch (error) {
-            this.logger.error(`Error deleting file ${fileKey}: ${error.message}`);
-            throw error;
-        }
+  async promote(
+    sourceKey: string,
+    destinationKey: string,
+    generation: string,
+  ): Promise<void> {
+    const source = this.bucket.file(sourceKey, { generation });
+    await source.copy(this.bucket.file(destinationKey), {
+      contentDisposition: 'inline',
+      preconditionOpts: { ifGenerationMatch: 0 },
+    });
+    try {
+      await source.delete({ ignoreNotFound: true });
+    } catch (error) {
+      this.logger.warn(
+        `Temporary object cleanup failed for ${sourceKey}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+  }
 
-    async getSignedUrl(fileKey: string): Promise<string> {
-        const [url] = await this.bucket.file(fileKey).getSignedUrl({
-            version: 'v4',
-            action: 'read',
-            expires: Date.now() + 15 * 60 * 1000,
-        });
-        return url;
-    }
+  async delete(key: string): Promise<void> {
+    await this.bucket.file(key).delete({ ignoreNotFound: true });
+  }
 
-    getGsUri(fileKey: string): string {
-        return `gs://${this.bucketName}/${fileKey}`;
-    }
-
-    // --- Signed URL new method ---
-    async getUploadSignedUrl(filename: string, contentType: string, folder?: string): Promise<{ url: string; key: string }> {
-
-        if (!ALLOWED_MIME_TYPES.includes(contentType)) {
-            this.logger.warn(`Upload blocked: ${contentType}`);
-            throw new BadRequestException(`File type not allowed.`);
-        }
-
-        const extension = filename.split('.').pop() || '';
-        const uniqueFilename = `${uuidv4()}.${extension}`;
-        const filePath = folder ? `${folder}/${uniqueFilename}` : uniqueFilename;
-
-        const fileRef = this.bucket.file(filePath);
-
-        const [url] = await fileRef.getSignedUrl({
-            version: 'v4',
-            action: 'write',
-            expires: Date.now() + 15 * 60 * 1000,
-            contentType: contentType,
-        });
-
-        this.logger.log(`Generated upload Signed URL for: ${filePath}`);
-
-        return {
-            url,
-            key: filePath
-        };
-    }
+  getPublicUrl(key: string): string {
+    return `https://storage.googleapis.com/${this.bucketName}/${key}`;
+  }
 }

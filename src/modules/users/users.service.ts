@@ -17,6 +17,8 @@ import { UserRole } from './interfaces/user-role';
 import { AuthenticatedUser } from '../../common/interfaces/authenticated-user.interface';
 import { VendorLocation } from './entities/vendor-location.entity';
 import { MarketsService } from '../markets/markets.service';
+import { FilesService } from '../files/files.service';
+import { FileUploadPurpose } from '../files/file-upload-policy';
 import { VendorLocationDto } from './dto/create-vendor-profile.dto';
 import {
   createErrorPayload,
@@ -34,6 +36,7 @@ export class UsersService {
     private readonly vendorLocationRepository: Repository<VendorLocation>,
     private readonly passwordService: PasswordService,
     private readonly marketsService: MarketsService,
+    private readonly filesService: FilesService,
   ) {}
 
   async create(createUserDto: CreateUserDto): Promise<User> {
@@ -164,6 +167,16 @@ export class UsersService {
 
     if (vendorProfile && this.isVendor(user.role)) {
       const { location, ...profileData } = vendorProfile;
+      for (const field of ['logoUrl', 'coverImage'] as const) {
+        const url = profileData[field];
+        if (url && url !== user.vendorProfile?.[field]) {
+          await this.filesService.verifyAssetReference(
+            id,
+            url,
+            FileUploadPurpose.PROFILE_IMAGE,
+          );
+        }
+      }
       if (!user.vendorProfile) {
         user.vendorProfile = this.vendorProfileRepository.create({
           userId: user.id,
@@ -234,6 +247,14 @@ export class UsersService {
   }
 
   private validateVendorProfile(dto: CreateUserDto): void {
+    if (dto.vendorProfile?.logoUrl) {
+      throw new BadRequestException(
+        createErrorPayload(
+          ERROR_CODES.PROFILE_IMAGE_REQUIRES_UPLOAD,
+          'Profile image must be uploaded after registration',
+        ),
+      );
+    }
     if (this.isVendor(dto.role) && !dto.vendorProfile) {
       throw new BadRequestException(
         'Vendor profile is required for vendor accounts',

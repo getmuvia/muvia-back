@@ -1,56 +1,50 @@
 import {
-    Controller,
-    Post,
-    Delete,
-    Get,
-    Param,
-    Query,
-    UseGuards,
-    UseInterceptors,
-    UploadedFile,
-    Body,
+  Body,
+  Controller,
+  Delete,
+  Param,
+  Post,
+  UseGuards,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { FilesService } from './files.service';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
+import { Roles } from '../../common/decorators/roles.decorator';
+import { UserRole } from '../../common/enums/user-role.enum';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
-import { InitUploadDto } from './dto/upload-file.dto';
+import { RolesGuard } from '../../common/guards/roles.guard';
+import { CreateUploadPolicyDto } from './dto/create-upload-policy.dto';
+import { FinalizeUploadDto } from './dto/finalize-upload.dto';
+import { FilesService } from './files.service';
 
 @Controller('files')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.VENDOR)
 export class FilesController {
-    constructor(private readonly filesService: FilesService) { }
+  constructor(private readonly filesService: FilesService) {}
 
-    /**
-     * POST /files/upload-url
-     * Body: { "filename": "foto.jpg", "contentType": "image/jpeg" }
-     */
-    @Post('upload-url')
-    @UseGuards(JwtAuthGuard)
-    async getUploadUrl(
-        @Body() body: InitUploadDto,
-        @Query('folder') folder?: string,
-    ) {
-        return this.filesService.generateUploadUrl(body.filename, body.contentType, folder);
-    }
-    
-    @Post('upload')
-    @UseGuards(JwtAuthGuard)
-    @UseInterceptors(FileInterceptor('file'))
-    uploadFile(
-        @UploadedFile() file: Express.Multer.File,
-        @Query('folder') folder?: string,
-    ) {
-        return this.filesService.uploadFile(file, folder);
-    }
+  @Post('upload-url')
+  @UseGuards(ThrottlerGuard)
+  createUploadPolicy(
+    @CurrentUser('id') userId: string,
+    @Body() dto: CreateUploadPolicyDto,
+  ) {
+    return this.filesService.createUploadPolicy(userId, dto);
+  }
 
-    @Delete(':key')
-    @UseGuards(JwtAuthGuard)
-    deleteFile(@Param('key') key: string) {
-        return this.filesService.deleteFile(key);
-    }
+  @Post('finalize')
+  @UseGuards(ThrottlerGuard)
+  finalizeUpload(
+    @CurrentUser('id') userId: string,
+    @Body() dto: FinalizeUploadDto,
+  ) {
+    return this.filesService.finalizeUpload(userId, dto.key);
+  }
 
-    @Get('signed-url/:key')
-    @UseGuards(JwtAuthGuard)
-    getSignedUrl(@Param('key') key: string) {
-        return this.filesService.getSignedUrl(key);
-    }
+  @Delete(':key')
+  deleteFile(
+    @CurrentUser('id') userId: string,
+    @Param('key') key: string,
+  ): Promise<void> {
+    return this.filesService.deleteFile(userId, key);
+  }
 }

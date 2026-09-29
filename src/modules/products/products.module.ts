@@ -9,15 +9,23 @@ import { ProductListing } from './entities/product-listing.entity';
 import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { Category } from '../categories/entities/category.entity';
 import { MarketsModule } from '../markets/markets.module';
+import { FilesModule } from '../files/files.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Product, ProductAsset, ProductListing, VendorLocation, Category]),
+    TypeOrmModule.forFeature([
+      Product,
+      ProductAsset,
+      ProductListing,
+      VendorLocation,
+      Category,
+    ]),
     AiModule,
     MarketsModule,
+    FilesModule,
   ],
   controllers: [ProductsController],
   providers: [ProductsService],
   exports: [ProductsService],
 })
-export class ProductsModule { }
+export class ProductsModule {}
