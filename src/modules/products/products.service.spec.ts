@@ -4,6 +4,7 @@ import { EmbeddingService } from '../ai/services/embedding/embedding.service';
 import { Category } from '../categories/entities/category.entity';
 import { Market } from '../markets/entities/market.entity';
 import { MarketsService } from '../markets/markets.service';
+import { FilesService } from '../files/files.service';
 import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { ProductAsset } from './entities/product-asset.entity';
@@ -48,6 +49,7 @@ describe('ProductsService transactional writes', () => {
   let categoryRepositoryInTransaction: RepositoryMock;
   let marketRepositoryInTransaction: RepositoryMock;
   let embeddingService: { updateForProduct: jest.Mock };
+  let filesService: { verifyAssetReference: jest.Mock };
 
   const product = {
     id: productId,
@@ -77,6 +79,7 @@ describe('ProductsService transactional writes', () => {
     categoryRepositoryInTransaction = createRepositoryMock();
     marketRepositoryInTransaction = createRepositoryMock();
     standaloneAssetRepository = createRepositoryMock();
+    standaloneAssetRepository.find.mockResolvedValue([]);
 
     productRepositoryInTransaction.save.mockResolvedValue(product);
     productRepositoryInTransaction.findOne.mockResolvedValue(product);
@@ -114,9 +117,13 @@ describe('ProductsService transactional writes', () => {
     );
     productRepository = {
       manager: { transaction },
+      findOne: jest.fn().mockResolvedValue(product),
     } as unknown as Repository<Product>;
     embeddingService = {
       updateForProduct: jest.fn().mockResolvedValue(undefined),
+    };
+    filesService = {
+      verifyAssetReference: jest.fn().mockResolvedValue(undefined),
     };
 
     service = new ProductsService(
@@ -124,6 +131,7 @@ describe('ProductsService transactional writes', () => {
       standaloneAssetRepository as unknown as Repository<ProductAsset>,
       embeddingService as unknown as EmbeddingService,
       {} as MarketsService,
+      filesService as unknown as FilesService,
     );
   });
 
@@ -136,6 +144,22 @@ describe('ProductsService transactional writes', () => {
     expect(assetRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(standaloneAssetRepository.save).not.toHaveBeenCalled();
     expect(embeddingService.updateForProduct).toHaveBeenCalledWith(productId);
+    expect(filesService.verifyAssetReference).toHaveBeenCalledWith(
+      sellerId,
+      createDto.assets![0].url,
+      'product_image',
+    );
+  });
+
+  it('does not start a transaction when an asset fails storage verification', async () => {
+    filesService.verifyAssetReference.mockRejectedValue(
+      new Error('invalid asset'),
+    );
+
+    await expect(service.create(sellerId, createDto)).rejects.toThrow(
+      'invalid asset',
+    );
+    expect(transaction).not.toHaveBeenCalled();
   });
 
   it('does not schedule the embedding when a transactional create fails', async () => {

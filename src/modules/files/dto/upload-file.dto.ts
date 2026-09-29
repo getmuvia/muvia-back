@@ -1,15 +1,9 @@
-import { IsString, IsOptional } from 'class-validator';
-
-export class UploadFileDto {
-    @IsString()
-    @IsOptional()
-    folder?: string;
-}
+import { IsString } from 'class-validator';
 
 export class InitUploadDto {
-    @IsString()
-    filename: string;
-    
-    @IsString()
-    contentType: string;
+  @IsString()
+  filename: string;
+
+  @IsString()
+  contentType: string;
 }
