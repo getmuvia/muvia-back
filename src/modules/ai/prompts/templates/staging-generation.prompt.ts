@@ -63,7 +63,7 @@ ${productList}
 
 These elements are FIXED CONSTRUCTION and must remain EXACTLY as shown in IMAGE 1:
 
-**STRUCTURAL ELEMENTS (OBRA BRUTA):**
+**STRUCTURAL ELEMENTS:**
 - Wall positions, angles, and colors (unless you're adding accent paint)
 - Ceiling height, shape, and angle (including sloped/vaulted ceilings)
 - Floor material, pattern, and color (keep original wood, tile, carpet, etc.)

@@ -18,10 +18,7 @@ import { CreateProductAssetDto } from './dto/create-product-asset.dto';
 import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { SyncProductAssetDto } from './dto/sync-product-asset.dto';
 import { EmbeddingService } from '../ai/services/embedding/embedding.service';
-import {
-  normalizedSearchSql,
-  normalizeSearchText,
-} from '../../common/search/search-text';
+import { normalizeSearchText } from '../../common/search/search-text';
 import { ProductListing } from './entities/product-listing.entity';
 import { VendorLocation } from '../users/entities/vendor-location.entity';
 import { Category } from '../categories/entities/category.entity';
@@ -498,9 +495,9 @@ export class ProductsService {
       const search = normalizeSearchText(filters.search);
       queryBuilder.andWhere(
         search
-          ? `(${normalizedSearchSql('product.title')} LIKE :search
-          OR ${normalizedSearchSql('product.description')} LIKE :search
-          OR ${normalizedSearchSql("array_to_string(product.keywords, ' ')")} LIKE :search)`
+          ? `(product.searchTitle LIKE :search
+          OR product.searchDescription LIKE :search
+          OR product.searchKeywords LIKE :search)`
           : '1 = 0',
         { search: `%${search}%` },
       );

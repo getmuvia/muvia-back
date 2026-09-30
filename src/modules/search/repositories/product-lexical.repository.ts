@@ -5,7 +5,6 @@ import {
   VALID_PRODUCT_DIMENSION_PATTERN,
   productDimensionCmSql,
 } from '../../../common/search/product-measurement';
-import { normalizedSearchSql } from '../../../common/search/search-text';
 import { Product } from '../../products/entities/product.entity';
 import type { SearchIntent } from '../interfaces/search-intent.interface';
 
@@ -25,10 +24,10 @@ export class ProductLexicalRepository {
     const terms = [...new Set([...intent.terms, ...intent.aliases])];
     if (!terms.length && !intent.measurement) return [];
 
-    const title = `(' ' || ${normalizedSearchSql('product.title')} || ' ')`;
-    const keywords = `(' ' || ${normalizedSearchSql("array_to_string(product.keywords, ' ')")} || ' ')`;
-    const description = `(' ' || ${normalizedSearchSql('product.description')} || ' ')`;
-    const material = `(' ' || ${normalizedSearchSql("product.specifications ->> 'material'")} || ' ')`;
+    const title = 'product.searchTitle';
+    const keywords = 'product.searchKeywords';
+    const description = 'product.searchDescription';
+    const material = 'product.searchMaterial';
     const parameters = Object.fromEntries(
       terms.map((term, index) => [
         `term${index}`,
