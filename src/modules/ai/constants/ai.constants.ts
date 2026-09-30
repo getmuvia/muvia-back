@@ -61,7 +61,7 @@ export const RETRY = {
  * Increment when the searchable product document changes. Stored vectors with
  * another version remain usable during rollout and are selected for refresh.
  */
-export const PRODUCT_EMBEDDING_CONTENT_VERSION = 2;
+export const PRODUCT_EMBEDDING_CONTENT_VERSION = 3;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Design Styles

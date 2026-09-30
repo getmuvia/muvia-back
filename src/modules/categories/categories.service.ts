@@ -14,7 +14,7 @@ export class CategoriesService {
   constructor(
     @InjectRepository(Category)
     private readonly categoryRepository: Repository<Category>,
-  ) { }
+  ) {}
 
   async create(createCategoryDto: CreateCategoryDto): Promise<Category> {
     const level = await this.calculateLevel(createCategoryDto.parentId);
@@ -42,13 +42,17 @@ export class CategoriesService {
     });
     const normalizedLocale = locale.replace('_', '-').toLowerCase();
     const language = normalizedLocale.split('-')[0];
-    return categories.map(category => {
-      const translation = category.translations.find(item =>
-        item.locale.toLowerCase() === normalizedLocale,
-      ) ?? category.translations.find(item =>
-        item.locale.toLowerCase().split('-')[0] === language,
-      );
-      return Object.assign(category, { name: translation?.name ?? category.name });
+    return categories.map((category) => {
+      const translation =
+        category.translations.find(
+          (item) => item.locale.toLowerCase() === normalizedLocale,
+        ) ??
+        category.translations.find(
+          (item) => item.locale.toLowerCase().split('-')[0] === language,
+        );
+      return Object.assign(category, {
+        name: translation?.name ?? category.name,
+      });
     });
   }
 
@@ -86,26 +90,60 @@ export class CategoriesService {
     });
   }
 
-  async update(id: string, updateCategoryDto: UpdateCategoryDto): Promise<Category> {
-    const category = await this.findOne(id);
-
-    if (updateCategoryDto.parentId !== undefined) {
-      await this.validateParentChange(id, updateCategoryDto.parentId);
-      category.level = await this.calculateLevel(updateCategoryDto.parentId);
-    }
-
-    Object.assign(category, updateCategoryDto);
-    await this.categoryRepository.save(category);
+  async update(
+    id: string,
+    updateCategoryDto: UpdateCategoryDto,
+  ): Promise<Category> {
+    await this.categoryRepository.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(Category);
+      const category = await repository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!category)
+        throw new NotFoundException(`Category with ID ${id} not found`);
+      const previousName = category.name;
+      const previousCode = category.code;
+      if (updateCategoryDto.parentId !== undefined) {
+        await this.validateParentChange(id, updateCategoryDto.parentId);
+        category.level = await this.calculateLevel(updateCategoryDto.parentId);
+      }
+      Object.assign(category, updateCategoryDto);
+      await repository.save(category);
+      if (category.name !== previousName || category.code !== previousCode) {
+        // Scheduler picks up these invalidated products in bounded batches.
+        await manager.query(
+          `UPDATE products SET search_revision = search_revision + 1,
+             embedding_target_id = NULL WHERE category_id = $1`,
+          [id],
+        );
+      }
+    });
 
     return this.findOne(id);
   }
 
   async remove(id: string): Promise<void> {
-    const category = await this.findOne(id);
-    await this.categoryRepository.remove(category);
+    await this.categoryRepository.manager.transaction(async (manager) => {
+      const repository = manager.getRepository(Category);
+      const category = await repository.findOne({
+        where: { id },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!category)
+        throw new NotFoundException(`Category with ID ${id} not found`);
+      await manager.query(
+        `UPDATE products SET category_id = NULL, search_revision = search_revision + 1,
+           embedding_target_id = NULL WHERE category_id = $1`,
+        [id],
+      );
+      await repository.remove(category);
+    });
   }
 
-  private async calculateLevel(parentId: string | undefined | null): Promise<number> {
+  private async calculateLevel(
+    parentId: string | undefined | null,
+  ): Promise<number> {
     if (!parentId) {
       return 0;
     }
@@ -115,13 +153,18 @@ export class CategoriesService {
     });
 
     if (!parent) {
-      throw new NotFoundException(`Parent category with ID ${parentId} not found`);
+      throw new NotFoundException(
+        `Parent category with ID ${parentId} not found`,
+      );
     }
 
     return parent.level + 1;
   }
 
-  private async validateParentChange(categoryId: string, newParentId: string | null): Promise<void> {
+  private async validateParentChange(
+    categoryId: string,
+    newParentId: string | null,
+  ): Promise<void> {
     if (!newParentId) {
       return;
     }
@@ -132,7 +175,9 @@ export class CategoriesService {
 
     const descendants = await this.getDescendantIds(categoryId);
     if (descendants.includes(newParentId)) {
-      throw new BadRequestException('Cannot set a descendant as parent (circular reference)');
+      throw new BadRequestException(
+        'Cannot set a descendant as parent (circular reference)',
+      );
     }
   }
 
@@ -156,7 +201,9 @@ export class CategoriesService {
     return descendantIds;
   }
 
-  private async loadSubcategoriesRecursively(category: Category): Promise<Category> {
+  private async loadSubcategoriesRecursively(
+    category: Category,
+  ): Promise<Category> {
     if (!category.subcategories || category.subcategories.length === 0) {
       return category;
     }
@@ -167,7 +214,8 @@ export class CategoriesService {
         relations: ['subcategories'],
       });
       if (fullSubcategory) {
-        category.subcategories[i] = await this.loadSubcategoriesRecursively(fullSubcategory);
+        category.subcategories[i] =
+          await this.loadSubcategoriesRecursively(fullSubcategory);
       }
     }
 

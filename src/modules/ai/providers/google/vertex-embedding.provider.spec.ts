@@ -1,14 +1,25 @@
-import { helpers } from '@google-cloud/aiplatform';
+import { helpers, type protos } from '@google-cloud/aiplatform';
 import { ConfigService } from '@nestjs/config';
 import { AI_RUNTIME_SETTINGS } from '../../../../config/ai.config';
 import { RetryService } from '../../core';
 import { VertexEmbeddingProvider } from './vertex-embedding.provider';
 
-const mockPredict = jest.fn();
+type ProtobufValue = Parameters<typeof helpers.fromValue>[0];
+type PredictionRequest = {
+  endpoint: string;
+  instances: ProtobufValue[];
+  parameters: ProtobufValue;
+};
+const mockPredict = jest.fn<
+  Promise<[protos.google.cloud.aiplatform.v1.IPredictResponse]>,
+  [PredictionRequest, { timeout: number; retry: null }]
+>();
 const mockPredictionServiceClient = jest.fn();
 
 jest.mock('@google-cloud/aiplatform', () => {
-  const actual = jest.requireActual('@google-cloud/aiplatform');
+  const actual = jest.requireActual<typeof import('@google-cloud/aiplatform')>(
+    '@google-cloud/aiplatform',
+  );
 
   return {
     ...actual,
@@ -84,6 +95,10 @@ describe('VertexEmbeddingProvider', () => {
       autoTruncate: true,
       outputDimensionality: AI_RUNTIME_SETTINGS.embeddingDimensions,
     });
+    expect(mockPredict.mock.calls[0][1]).toEqual({
+      timeout: 30_000,
+      retry: null,
+    });
     expect(result.dimensions).toBe(768);
     expect(result.embedding.slice(0, 2)).toEqual([0.6, 0.8]);
     expect(
@@ -98,7 +113,7 @@ describe('VertexEmbeddingProvider', () => {
     const provider = createProvider();
 
     await expect(provider.generateEmbedding('sofa')).rejects.toThrow(
-      'Embedding generation failed: Invalid embedding: expected 768 finite values',
+      'Invalid embedding: expected 768 finite values',
     );
   });
 });

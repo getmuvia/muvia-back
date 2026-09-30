@@ -16,6 +16,8 @@ import { AddVirtualStagingQuota1788321600000 } from './migrations/1788321600000-
 import { AddMarketsListingsAndTaxonomy1788880000000 } from './migrations/1788880000000-add-markets-listings-and-taxonomy';
 import { AddProductEmbeddingModel1789747200000 } from './migrations/1789747200000-add-product-embedding-model';
 import { AddProductEmbeddingContentVersion1790380800000 } from './migrations/1790380800000-add-product-embedding-content-version';
+import { ProductEmbeddingJob } from '../modules/ai/entities/product-embedding-job.entity';
+import { AddDurableEmbeddingJobs1790726400000 } from './migrations/1790726400000-add-durable-embedding-jobs';
 
 const host = process.env.DB_HOST;
 const usesCloudSqlSocket = host?.startsWith('/');
@@ -44,6 +46,7 @@ export default new DataSource({
     Product,
     ProductAsset,
     ProductListing,
+    ProductEmbeddingJob,
   ],
   migrations: [
     InitialSchema1787070000000,
@@ -51,6 +54,7 @@ export default new DataSource({
     AddMarketsListingsAndTaxonomy1788880000000,
     AddProductEmbeddingModel1789747200000,
     AddProductEmbeddingContentVersion1790380800000,
+    AddDurableEmbeddingJobs1790726400000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,
