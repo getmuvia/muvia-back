@@ -12,6 +12,7 @@ import configuredSource from '../../../database/data-source';
 import { AddProductSearchText1790726401000 } from '../../../database/migrations/1790726401000-add-product-search-text';
 import { EmbeddingService } from '../../ai/services/embedding/embedding.service';
 import { FilesService } from '../../files/files.service';
+import { Category } from '../../categories/entities/category.entity';
 import { Market } from '../../markets/entities/market.entity';
 import { MarketsService } from '../../markets/markets.service';
 import { ProductAsset } from '../../products/entities/product-asset.entity';
@@ -332,7 +333,7 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       new Set([a, b]),
     );
     expect(first.data[0].price).toBeLessThanOrEqual(800);
-    expect(first.data[0].stock).toBe(3);
+    expect(first.data[0].currencyCode).toBe('BOB');
     expect((await catalog.findAll({ search: 'illón' })).total).toBe(3);
     expect((await catalog.findAll({ search: '---' })).total).toBe(0);
   });
@@ -362,6 +363,77 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect(aliases[0].assets).toHaveLength(2);
     expect(aliases[0].price).toBe(400);
     expect(aliases[0].searchTitle).toBeUndefined();
+  });
+
+  it('returns a market-priced catalog summary while preserving full product details', async () => {
+    const id = await seed('Catalog desk', { price: 725 });
+    const category = await source.getRepository(Category).save({
+      code: 'CATALOG_TEST',
+      name: 'Catalog desks',
+    });
+    await products.update(id, { categoryId: category.id });
+    await db.query(
+      `INSERT INTO product_assets (product_id, url, type, "isPrimary", metadata)
+       VALUES ($1, 'https://example.com/secondary.webp', 'image', false, '{}'),
+              ($1, 'https://example.com/cover.webp', 'image', true, '{"alt":"Desk cover","width":2400}'),
+              ($1, 'https://example.com/desk.glb', 'model_3d', true, '{}')`,
+      [id],
+    );
+    const page = await catalog.findAll({ page: 1, limit: 10 });
+    expect(page.data).toEqual([
+      {
+        id,
+        title: 'Catalog desk',
+        price: 725,
+        currencyCode: 'BOB',
+        category: { id: category.id, name: 'Catalog desks' },
+        primaryImage: {
+          url: 'https://example.com/cover.webp',
+          alt: 'Desk cover',
+        },
+      },
+    ]);
+    expect(page.total).toBe(1);
+    const detail = await catalog.findOne(id);
+    expect(detail.assets).toHaveLength(3);
+    expect(detail.specifications).toBeDefined();
+    expect(detail.sellerId).toBe(sellerId);
+  });
+
+  it('paginates products independently of asset counts and falls back to a non-primary image', async () => {
+    const firstId = await seed('Desk');
+    const secondId = await seed('Chair');
+    const noImageId = await seed('Table');
+    await db.query(
+      `INSERT INTO product_assets (product_id, url, type, "isPrimary")
+       VALUES ($1, 'https://example.com/desk.glb', 'model_3d', true),
+              ($1, 'https://example.com/desk.webp', 'image', false),
+              ($2, '', 'image', true),
+              ($2, 'https://example.com/chair.webp', 'image', false)`,
+      [firstId, secondId],
+    );
+    const pages = await Promise.all(
+      [1, 2, 3].map((page) => catalog.findAll({ page, limit: 1 })),
+    );
+    expect(
+      pages.every((page) => page.total === 3 && page.totalPages === 3),
+    ).toBe(true);
+    const summaries = pages.flatMap((page) => page.data);
+    expect(new Set(summaries.map((product) => product.id))).toEqual(
+      new Set([firstId, secondId, noImageId]),
+    );
+    expect(
+      summaries.find((product) => product.id === firstId)?.primaryImage?.url,
+    ).toBe('https://example.com/desk.webp');
+    expect(
+      summaries.find((product) => product.id === secondId)?.primaryImage?.url,
+    ).toBe('https://example.com/chair.webp');
+    expect(
+      summaries.find((product) => product.id === noImageId)?.primaryImage,
+    ).toBeNull();
+    const empty = await catalog.findAll({ page: 4, limit: 1 });
+    expect(empty.data).toEqual([]);
+    expect(empty.total).toBe(3);
   });
 
   it('keeps material and measurement retrieval constrained to active listings in the requested market', async () => {

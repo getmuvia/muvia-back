@@ -14,6 +14,10 @@ import type { AssetMetadata } from './entities/product-asset.entity';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductFilterDto } from './dto/product-filter.dto';
+import type {
+  ProductCatalogPageDto,
+  ProductSummaryDto,
+} from './dto/product-summary.dto';
 import { CreateProductAssetDto } from './dto/create-product-asset.dto';
 import { UpdateProductAssetDto } from './dto/update-product-asset.dto';
 import { SyncProductAssetDto } from './dto/sync-product-asset.dto';
@@ -94,13 +98,7 @@ export class ProductsService {
     return savedProduct.product;
   }
 
-  async findAll(filterDto: ProductFilterDto): Promise<{
-    data: Product[];
-    total: number;
-    page: number;
-    limit: number;
-    totalPages: number;
-  }> {
+  async findAll(filterDto: ProductFilterDto): Promise<ProductCatalogPageDto> {
     const {
       page = 1,
       limit = 20,
@@ -111,14 +109,64 @@ export class ProductsService {
     const skip = (page - 1) * limit;
     await this.marketsService.requireActive(marketCode);
 
-    const queryBuilder = this.createBaseQuery(marketCode);
+    const queryBuilder = this.createCatalogQuery(marketCode);
     this.applyFilters(queryBuilder, filters);
 
-    queryBuilder.orderBy('product.createdAt', 'DESC');
-    queryBuilder.skip(skip).take(limit);
+    const countQuery = queryBuilder.clone();
+    queryBuilder
+      .select('product.id', 'id')
+      .addSelect('product.title', 'title')
+      .addSelect('listing.price', 'price')
+      .addSelect('listing.currencyCode', 'currencyCode')
+      .addSelect('category.id', 'categoryId')
+      .addSelect('category.name', 'categoryName')
+      .orderBy('product.createdAt', 'DESC')
+      .addOrderBy('product.id', 'DESC')
+      .offset(skip)
+      .limit(limit);
 
-    const [data, total] = await queryBuilder.getManyAndCount();
-    data.forEach((product) => this.applyListingSnapshot(product));
+    const [rows, total] = await Promise.all([
+      queryBuilder.getRawMany<{
+        id: string;
+        title: string;
+        price: string;
+        currencyCode: string;
+        categoryId: string | null;
+        categoryName: string | null;
+      }>(),
+      countQuery.getCount(),
+    ]);
+    // Fetch one image per product in the page, without multiplying catalog rows.
+    const images = rows.length
+      ? await this.assetRepository
+          .createQueryBuilder('image')
+          .distinctOn(['image.productId'])
+          .select('image.productId', 'productId')
+          .addSelect('image.url', 'url')
+          .addSelect("image.metadata ->> 'alt'", 'alt')
+          .where('image.productId IN (:...productIds)', {
+            productIds: rows.map((row) => row.id),
+          })
+          .andWhere('image.type = :imageType', { imageType: AssetType.IMAGE })
+          .andWhere("image.url <> ''")
+          .orderBy('image.productId', 'ASC')
+          .addOrderBy('image.isPrimary', 'DESC')
+          .addOrderBy('image.id', 'ASC')
+          .getRawMany<{ productId: string; url: string; alt: string | null }>()
+      : [];
+    const imagesByProduct = new Map(
+      images.map(({ productId, url, alt }) => [productId, { url, alt }]),
+    );
+    const data: ProductSummaryDto[] = rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      price: Number(row.price),
+      currencyCode: row.currencyCode,
+      category: row.categoryId
+        ? { id: row.categoryId, name: row.categoryName! }
+        : null,
+      primaryImage: imagesByProduct.get(row.id) ?? null,
+    }));
     return {
       data,
       total,
@@ -421,19 +469,16 @@ export class ProductsService {
     ].some((field) => Object.prototype.hasOwnProperty.call(dto, field));
   }
 
-  private createBaseQuery(marketCode: string) {
+  private createCatalogQuery(marketCode: string) {
     return this.productRepository
       .createQueryBuilder('product')
-      .leftJoinAndSelect('product.assets', 'assets')
-      .leftJoinAndSelect('product.category', 'category')
-      .innerJoinAndSelect(
+      .leftJoin('product.category', 'category')
+      .innerJoin(
         'product.listings',
         'listing',
         'listing.marketCode = :marketCode AND listing.isActive = true',
         { marketCode },
-      )
-      .leftJoinAndSelect('listing.market', 'market')
-      .leftJoinAndSelect('listing.vendorLocation', 'vendorLocation');
+      );
   }
 
   private async createAssets(
@@ -698,12 +743,5 @@ export class ProductsService {
     }
 
     return product;
-  }
-
-  private applyListingSnapshot(product: Product): void {
-    const listing = product.listings?.[0];
-    if (!listing) return;
-    product.price = Number(listing.price);
-    product.stock = listing.stock;
   }
 }
