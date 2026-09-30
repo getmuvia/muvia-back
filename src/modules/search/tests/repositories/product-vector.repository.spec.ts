@@ -3,6 +3,7 @@ import { Repository } from 'typeorm';
 import { ProductDimension } from '../../../../common/search/product-measurement';
 import { Product } from '../../../products/entities/product.entity';
 import { ProductVectorRepository } from '../../repositories/product-vector.repository';
+import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../../ai/constants/ai.constants';
 
 describe('ProductVectorRepository', () => {
   it('filters by the configured embedding model and optional measurement', async () => {
@@ -25,6 +26,10 @@ describe('ProductVectorRepository', () => {
     const [query, parameters] = (typeOrmRepository.query as jest.Mock).mock
       .calls[0] as [string, unknown[]];
     expect(query).toContain('p.embedding_model = $5');
+    expect(query).toContain('p.embedding_revision = p.search_revision');
+    expect(query).toContain(
+      `p.embedding_content_version = ${PRODUCT_EMBEDDING_CONTENT_VERSION}`,
+    );
     expect(query).toContain('<= $7');
     expect(parameters).toEqual([
       '[0.1,0.2]',

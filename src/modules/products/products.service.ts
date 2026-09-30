@@ -3,7 +3,6 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
-  Logger,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository, In, SelectQueryBuilder } from 'typeorm';
@@ -43,8 +42,6 @@ import {
 
 @Injectable()
 export class ProductsService {
-  private readonly logger = new Logger(ProductsService.name);
-
   constructor(
     @InjectRepository(Product)
     private readonly productRepository: Repository<Product>,
@@ -82,12 +79,22 @@ export class ProductsService {
           await this.createAssets(saved.id, assets, assetRepository);
         }
 
-        return this.findOneWithRepository(saved.id, productRepository);
+        const jobId = await this.embeddingService.recordChange(
+          manager,
+          saved.id,
+        );
+        return {
+          product: await this.findOneWithRepository(
+            saved.id,
+            productRepository,
+          ),
+          jobId,
+        };
       },
     );
 
-    this.scheduleEmbeddingGeneration(savedProduct.id);
-    return savedProduct;
+    await this.embeddingService.dispatch(savedProduct.jobId);
+    return savedProduct.product;
   }
 
   async findAll(filterDto: ProductFilterDto): Promise<{
@@ -181,8 +188,11 @@ export class ProductsService {
         const assetRepository = manager.getRepository(ProductAsset);
         const categoryRepository = manager.getRepository(Category);
 
-        const product = await this.requireProduct(id, productRepository);
+        const product = await this.requireProduct(id, productRepository, true);
         this.validateOwnership(product, sellerId);
+        const previousDocument = this.includesSearchFields(dto)
+          ? await this.embeddingService.document(manager, id)
+          : undefined;
         await this.validateSelectableCategory(
           productData.categoryId,
           categoryRepository,
@@ -214,15 +224,23 @@ export class ProductsService {
           await this.syncAssets(id, assets, assetRepository);
         }
 
-        return this.findOneWithRepository(id, productRepository);
+        const jobId =
+          previousDocument !== undefined
+            ? await this.embeddingService.recordChange(
+                manager,
+                id,
+                previousDocument,
+              )
+            : null;
+        return {
+          product: await this.findOneWithRepository(id, productRepository),
+          jobId,
+        };
       },
     );
 
-    if (this.shouldRegenerateEmbedding(dto)) {
-      this.scheduleEmbeddingGeneration(id);
-    }
-
-    return updatedProduct;
+    await this.embeddingService.dispatch(updatedProduct.jobId);
+    return updatedProduct.product;
   }
 
   private async syncAssets(
@@ -396,18 +414,7 @@ export class ProductsService {
   // Private Helper Methods
   // ─────────────────────────────────────────────────────────────────────────
 
-  private scheduleEmbeddingGeneration(productId: string): void {
-    void this.embeddingService
-      .updateForProduct(productId)
-      .catch((error: unknown) => {
-        this.logger.error(
-          `Embedding generation failed for product ${productId}`,
-          error instanceof Error ? error.stack : undefined,
-        );
-      });
-  }
-
-  private shouldRegenerateEmbedding(dto: UpdateProductDto): boolean {
+  private includesSearchFields(dto: UpdateProductDto): boolean {
     return [
       'title',
       'description',
@@ -651,8 +658,12 @@ export class ProductsService {
   private async requireProduct(
     id: string,
     productRepository: Repository<Product>,
+    lock = false,
   ): Promise<Product> {
-    const product = await productRepository.findOne({ where: { id } });
+    const product = await productRepository.findOne({
+      where: { id },
+      ...(lock ? { lock: { mode: 'pessimistic_write' as const } } : {}),
+    });
     if (!product) {
       throw new NotFoundException(
         createErrorPayload(

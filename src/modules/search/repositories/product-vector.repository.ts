@@ -9,6 +9,7 @@ import {
 } from '../../../common/search/product-measurement';
 import { AI_ENV_KEYS } from '../../../config/ai.config';
 import { Product } from '../../products/entities/product.entity';
+import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../ai/constants/ai.constants';
 import type { SearchProductResult } from '../interfaces/search-result.interface';
 
 type RawSearchProductResult = Omit<SearchProductResult, 'similarity'> & {
@@ -91,6 +92,8 @@ export class ProductVectorRepository {
       WHERE p.embedding IS NOT NULL
         AND 1 - (p.embedding <=> $1::vector) >= $2
         AND p.embedding_model = $5
+        AND p.embedding_revision = p.search_revision
+        AND p.embedding_content_version = ${PRODUCT_EMBEDDING_CONTENT_VERSION}
         ${dimensionFilter}
       ORDER BY p.embedding <=> $1::vector ASC
       LIMIT $4

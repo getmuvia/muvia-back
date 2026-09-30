@@ -10,6 +10,65 @@ const baseEnvironment = {
 };
 
 describe('envValidationSchema AI configuration', () => {
+  const taskEnvironment = {
+    EMBEDDING_TASKS_ENABLED: 'true',
+    GCP_PROJECT_ID: 'muvia-test',
+    EMBEDDING_TASKS_QUEUE: 'muvia-embeddings',
+    EMBEDDING_TASKS_TARGET_URL: 'https://muvia-back-test.run.app',
+    EMBEDDING_TASKS_SERVICE_ACCOUNT:
+      'invoker@muvia-test.iam.gserviceaccount.com',
+  };
+
+  it('requires a complete queue configuration when enabled', () => {
+    const { error } = envValidationSchema.validate(
+      {
+        ...baseEnvironment,
+        EMBEDDING_TASKS_ENABLED: true,
+      },
+      { abortEarly: false },
+    );
+    expect(error?.details.map((detail) => detail.path.join('.'))).toEqual(
+      expect.arrayContaining([
+        'GCP_PROJECT_ID',
+        'EMBEDDING_TASKS_QUEUE',
+        'EMBEDDING_TASKS_TARGET_URL',
+        'EMBEDDING_TASKS_SERVICE_ACCOUNT',
+      ]),
+    );
+  });
+
+  it('accepts a complete task configuration and converts its flag to a boolean', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...taskEnvironment,
+    });
+    expect(result.error).toBeUndefined();
+    expect(
+      (result.value as Record<string, unknown>).EMBEDDING_TASKS_ENABLED,
+    ).toBe(true);
+  });
+
+  it.each([
+    'http://muvia-back-test.run.app',
+    'https://muvia-back-test.run.app/internal',
+  ])('rejects an unsafe or mismatched task audience: %s', (url) => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...taskEnvironment,
+      EMBEDDING_TASKS_TARGET_URL: url,
+    });
+    expect(result.error).toBeDefined();
+  });
+
+  it('rejects an ordinary email as the task service account', () => {
+    const result = envValidationSchema.validate({
+      ...baseEnvironment,
+      ...taskEnvironment,
+      EMBEDDING_TASKS_SERVICE_ACCOUNT: 'user@example.com',
+    });
+    expect(result.error).toBeDefined();
+  });
+
   it('disables public registration by default', () => {
     const result = envValidationSchema.validate(baseEnvironment);
     const value = result.value as Record<string, unknown>;

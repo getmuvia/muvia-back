@@ -9,6 +9,11 @@ import { ImageResolverService } from './core/image';
 
 // Repository
 import { ProductEmbeddingRepository } from './repositories/product-embedding.repository';
+import { ProductEmbeddingJob } from './entities/product-embedding-job.entity';
+import { EmbeddingJobsController } from './controllers/embedding-jobs.controller';
+import { EmbeddingTaskAuthGuard } from './guards/embedding-task-auth.guard';
+import { CloudTasksEmbeddingQueue } from './providers/google/cloud-tasks-embedding.queue';
+import { EMBEDDING_TASK_QUEUE } from './interfaces/embedding-task-queue.interface';
 
 // Services
 import { VectorService } from './services/vector/vector.service';
@@ -48,10 +53,11 @@ import {
  * To change AI providers, modify the useClass in the providers array.
  */
 @Module({
-  imports: [TypeOrmModule.forFeature([Product, User])],
+  imports: [TypeOrmModule.forFeature([Product, User, ProductEmbeddingJob])],
 
   controllers: [
     EmbeddingController,
+    EmbeddingJobsController,
     VirtualStagingController,
     Scan3dController,
   ],
@@ -64,6 +70,8 @@ import {
 
     VectorService,
     EmbeddingService,
+    EmbeddingTaskAuthGuard,
+    { provide: EMBEDDING_TASK_QUEUE, useClass: CloudTasksEmbeddingQueue },
     Scan3dService,
 
     {

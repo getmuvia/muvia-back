@@ -32,11 +32,13 @@ export const envValidationSchema = Joi.object({
   }),
 
   // Google Cloud Platform - Vertex AI
-  GCP_PROJECT_ID: Joi.string().when('NODE_ENV', {
-    is: 'production',
-    then: Joi.required(),
-    otherwise: Joi.optional(),
-  }),
+  GCP_PROJECT_ID: Joi.string()
+    .when('NODE_ENV', {
+      is: 'production',
+      then: Joi.required(),
+      otherwise: Joi.optional(),
+    })
+    .when('EMBEDDING_TASKS_ENABLED', { is: true, then: Joi.required() }),
   GCP_LOCATION: Joi.string()
     .trim()
     .min(1)
@@ -115,4 +117,30 @@ export const envValidationSchema = Joi.object({
     .default(AI_RUNTIME_SETTINGS.searchIntentTimeoutMs),
   GCP_3D_LOCATION: Joi.string().default('us-central1'),
   GCP_3D_WORKER_IMAGE_URI: Joi.string().optional(),
+  EMBEDDING_TASKS_ENABLED: Joi.boolean().default(false),
+  EMBEDDING_TASKS_LOCATION: Joi.string().trim().min(1).default('us-central1'),
+  EMBEDDING_TASKS_QUEUE: Joi.string()
+    .trim()
+    .pattern(/^[a-zA-Z0-9_-]+$/)
+    .when('EMBEDDING_TASKS_ENABLED', {
+      is: true,
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  EMBEDDING_TASKS_TARGET_URL: Joi.string()
+    .uri({ scheme: ['https'] })
+    .pattern(/^https:\/\/[^/?#]+$/)
+    .when('EMBEDDING_TASKS_ENABLED', {
+      is: true,
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
+  EMBEDDING_TASKS_SERVICE_ACCOUNT: Joi.string()
+    .email()
+    .pattern(/^[^@\s]+@[^@\s]+\.iam\.gserviceaccount\.com$/)
+    .when('EMBEDDING_TASKS_ENABLED', {
+      is: true,
+      then: Joi.required(),
+      otherwise: Joi.optional().allow(''),
+    }),
 });

@@ -48,16 +48,14 @@ describe('ProductsService transactional writes', () => {
   let locationRepositoryInTransaction: RepositoryMock;
   let categoryRepositoryInTransaction: RepositoryMock;
   let marketRepositoryInTransaction: RepositoryMock;
-  let embeddingService: { updateForProduct: jest.Mock };
+  let embeddingService: {
+    document: jest.Mock;
+    recordChange: jest.Mock;
+    dispatch: jest.Mock;
+  };
   let filesService: { verifyAssetReference: jest.Mock };
 
-  const product = {
-    id: productId,
-    sellerId,
-    title: 'Desk',
-    price: 120,
-    stock: 4,
-  } as Product;
+  let product: Product;
 
   const createDto: CreateProductDto = {
     title: 'Desk',
@@ -72,6 +70,13 @@ describe('ProductsService transactional writes', () => {
   };
 
   beforeEach(() => {
+    product = {
+      id: productId,
+      sellerId,
+      title: 'Desk',
+      price: 120,
+      stock: 4,
+    } as Product;
     productRepositoryInTransaction = createRepositoryMock();
     assetRepositoryInTransaction = createRepositoryMock();
     listingRepositoryInTransaction = createRepositoryMock();
@@ -120,7 +125,9 @@ describe('ProductsService transactional writes', () => {
       findOne: jest.fn().mockResolvedValue(product),
     } as unknown as Repository<Product>;
     embeddingService = {
-      updateForProduct: jest.fn().mockResolvedValue(undefined),
+      document: jest.fn().mockResolvedValue('previous document'),
+      recordChange: jest.fn().mockResolvedValue('job-id'),
+      dispatch: jest.fn().mockResolvedValue(undefined),
     };
     filesService = {
       verifyAssetReference: jest.fn().mockResolvedValue(undefined),
@@ -143,7 +150,11 @@ describe('ProductsService transactional writes', () => {
     expect(listingRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(assetRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(standaloneAssetRepository.save).not.toHaveBeenCalled();
-    expect(embeddingService.updateForProduct).toHaveBeenCalledWith(productId);
+    expect(embeddingService.recordChange).toHaveBeenCalledWith(
+      expect.any(Object),
+      productId,
+    );
+    expect(embeddingService.dispatch).toHaveBeenCalledWith('job-id');
     expect(filesService.verifyAssetReference).toHaveBeenCalledWith(
       sellerId,
       createDto.assets![0].url,
@@ -175,7 +186,7 @@ describe('ProductsService transactional writes', () => {
     expect(productRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(listingRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(assetRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
-    expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
+    expect(embeddingService.dispatch).not.toHaveBeenCalled();
   });
 
   it('does not schedule the embedding when a transactional update fails', async () => {
@@ -199,7 +210,7 @@ describe('ProductsService transactional writes', () => {
     expect(transaction).toHaveBeenCalledTimes(1);
     expect(productRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
     expect(assetRepositoryInTransaction.save).toHaveBeenCalledTimes(1);
-    expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
+    expect(embeddingService.dispatch).not.toHaveBeenCalled();
   });
 
   it('regenerates the embedding when structured specifications change', async () => {
@@ -207,7 +218,15 @@ describe('ProductsService transactional writes', () => {
       specifications: { material: 'Melamina' },
     });
 
-    expect(embeddingService.updateForProduct).toHaveBeenCalledWith(productId);
+    expect(embeddingService.recordChange).toHaveBeenCalledWith(
+      expect.any(Object),
+      productId,
+      'previous document',
+    );
+    expect(productRepositoryInTransaction.findOne).toHaveBeenCalledWith({
+      where: { id: productId },
+      lock: { mode: 'pessimistic_write' },
+    });
   });
 
   it('exposes a stable code when the requested product does not exist', async () => {
@@ -221,7 +240,7 @@ describe('ProductsService transactional writes', () => {
     expect((error as NotFoundException).getResponse()).toMatchObject({
       code: 'PRODUCT_NOT_FOUND',
     });
-    expect(embeddingService.updateForProduct).not.toHaveBeenCalled();
+    expect(embeddingService.dispatch).not.toHaveBeenCalled();
   });
 
   it('changes the primary asset atomically', async () => {
@@ -243,5 +262,21 @@ describe('ProductsService transactional writes', () => {
       { isPrimary: true },
     );
     expect(standaloneAssetRepository.update).not.toHaveBeenCalled();
+  });
+
+  it('does not create an embedding job for a price-only edit', async () => {
+    await service.update(productId, sellerId, { price: 130 });
+    expect(embeddingService.document).not.toHaveBeenCalled();
+    expect(embeddingService.recordChange).not.toHaveBeenCalled();
+  });
+
+  it('fails the product transaction if its durable job cannot be saved', async () => {
+    embeddingService.recordChange.mockRejectedValue(
+      new Error('outbox write failed'),
+    );
+    await expect(service.create(sellerId, createDto)).rejects.toThrow(
+      'outbox write failed',
+    );
+    expect(embeddingService.dispatch).not.toHaveBeenCalled();
   });
 });

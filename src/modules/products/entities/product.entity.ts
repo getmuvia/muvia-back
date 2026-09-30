@@ -6,6 +6,7 @@ import {
   ManyToOne,
   OneToMany,
   JoinColumn,
+  Index,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
@@ -26,6 +27,9 @@ export interface ProductSpecifications {
 }
 
 @Entity('products')
+@Index('IDX_products_pending_embedding', ['id'], {
+  where: 'embedding_revision IS DISTINCT FROM search_revision',
+})
 export class Product {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -79,6 +83,30 @@ export class Product {
     select: false,
   })
   embeddingContentVersion: number;
+
+  @Column({
+    name: 'search_revision',
+    type: 'integer',
+    default: 1,
+    select: false,
+  })
+  searchRevision: number;
+
+  @Column({
+    name: 'embedding_revision',
+    type: 'integer',
+    nullable: true,
+    select: false,
+  })
+  embeddingRevision: number | null;
+
+  @Column({
+    name: 'embedding_target_id',
+    type: 'uuid',
+    nullable: true,
+    select: false,
+  })
+  embeddingTargetId: string | null;
 
   @CreateDateColumn()
   createdAt: Date;

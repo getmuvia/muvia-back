@@ -1,4 +1,10 @@
-import { Controller, Post, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  HttpCode,
+  HttpStatus,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { EmbeddingService } from '../services/embedding/embedding.service';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -18,11 +24,12 @@ export class EmbeddingController {
    * Regenerates embeddings that are missing or use an outdated model.
    * Use after enabling semantic search, changing models, or updating product data.
    *
-   * @returns Count of updated and failed products
+   * Queues one bounded batch. Remaining products are recovered by Scheduler.
    */
   @Post('regenerate')
+  @HttpCode(HttpStatus.ACCEPTED)
   @Roles(UserRole.ADMIN)
-  regenerate(): Promise<{ updated: number; failed: number }> {
-    return this.embeddingService.regenerateAll();
+  regenerate(): Promise<{ queued: number; dispatched: number }> {
+    return this.embeddingService.enqueueRefresh();
   }
 }
