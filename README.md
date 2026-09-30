@@ -16,7 +16,7 @@ Make sure you have:
 
 - Node.js 20+
 - npm 10+
-- PostgreSQL 14+ (local) or Cloud SQL (Google Cloud)
+- PostgreSQL 16+ with UTF-8 encoding (local) or Cloud SQL (Google Cloud)
 - A Google Cloud project with required APIs enabled
 
 ### 2) Install dependencies
@@ -68,6 +68,10 @@ GCP_3D_WORKER_IMAGE_URI=us-central1-docker.pkg.dev/PROJECT_ID/muvia/muvia-3d-wor
 ```
 
 ### 4) Run in development
+
+Apply database migrations before starting the API. See
+[persisted product text search](docs/product-text-search.md#migration-and-rollout)
+for migration commands and guidance for existing development databases.
 
 ```bash
 npm run start:dev

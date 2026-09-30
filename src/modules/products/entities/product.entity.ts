@@ -12,6 +12,7 @@ import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { ProductAsset } from './product-asset.entity';
 import { ProductListing } from './product-listing.entity';
+import { normalizedSearchSql } from '../../../common/search/search-text';
 
 export interface ProductSpecifications {
   weight?: string;
@@ -27,6 +28,10 @@ export interface ProductSpecifications {
 }
 
 @Entity('products')
+@Index('IDX_products_search_title_trgm', { synchronize: false })
+@Index('IDX_products_search_description_trgm', { synchronize: false })
+@Index('IDX_products_search_keywords_trgm', { synchronize: false })
+@Index('IDX_products_search_material_trgm', { synchronize: false })
 @Index('IDX_products_pending_embedding', ['id'], {
   where: 'embedding_revision IS DISTINCT FROM search_revision',
 })
@@ -57,6 +62,52 @@ export class Product {
 
   @Column('text', { array: true, default: '{}' })
   keywords: string[];
+
+  // Space padding preserves lexical word boundaries and catalog substrings.
+  // These columns are maintained by PostgreSQL, including direct SQL writes.
+  @Column({
+    type: 'text',
+    name: 'search_title',
+    asExpression: `(' ' || ${normalizedSearchSql('title')} || ' ')`,
+    generatedType: 'STORED',
+    select: false,
+    insert: false,
+    update: false,
+  })
+  readonly searchTitle: string;
+
+  @Column({
+    type: 'text',
+    name: 'search_description',
+    asExpression: `(' ' || ${normalizedSearchSql('description')} || ' ')`,
+    generatedType: 'STORED',
+    select: false,
+    insert: false,
+    update: false,
+  })
+  readonly searchDescription: string;
+
+  @Column({
+    type: 'text',
+    name: 'search_keywords',
+    asExpression: `(' ' || ${normalizedSearchSql('muvia_join_search_keywords(keywords)')} || ' ')`,
+    generatedType: 'STORED',
+    select: false,
+    insert: false,
+    update: false,
+  })
+  readonly searchKeywords: string;
+
+  @Column({
+    type: 'text',
+    name: 'search_material',
+    asExpression: `(' ' || ${normalizedSearchSql("specifications ->> 'material'")} || ' ')`,
+    generatedType: 'STORED',
+    select: false,
+    insert: false,
+    update: false,
+  })
+  readonly searchMaterial: string;
 
   /**
    * Normalized vector embedding for semantic search (768 dimensions).
