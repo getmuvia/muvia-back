@@ -33,10 +33,9 @@
     "@nestjs/jwt": "^11.0.2",
     "@nestjs/mapped-types": "^2.1.1",
     "@nestjs/passport": "^11.0.5",
-    "@nestjs/platform-express": "^11.2.1",
+    "@nestjs/platform-express": "^11.2.7",
     "@nestjs/throttler": "^6.5.0",
     "@nestjs/typeorm": "^11.0.3",
-    "axios": "^1.19.0",
     "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.4",
@@ -82,7 +81,9 @@
     "typescript-eslint": "^8.53.1"
   },
   "overrides": {
-    "multer": "2.3.0"
+    "gaxios@6": {
+      "uuid": "11.1.1"
+    }
   },
   "jest": {
     "moduleFileExtensions": [
