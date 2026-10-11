@@ -1,6 +1,7 @@
 import { IsOptional, IsString, IsIn, IsUrl, IsUUID } from 'class-validator';
 import type { RoomAnalysisResult } from '../interfaces/vision-provider.interface';
 import { DESIGN_STYLES } from '../constants';
+import { ProductCondition } from '../../products/enums/product-condition.enum';
 
 /**
  * Request DTO for virtual staging endpoint.
@@ -29,86 +30,87 @@ import { DESIGN_STYLES } from '../constants';
  * }
  */
 export class VirtualStagingRequestDto {
-    /** Catalog product explicitly selected by the user for this generation. */
-    @IsUUID()
-    productId: string;
+  /** Catalog product explicitly selected by the user for this generation. */
+  @IsUUID()
+  productId: string;
 
-    /**
-     * Google Cloud Storage key for internally uploaded images.
-     * Use this when the image was uploaded via `/ai/virtual-staging/upload-url`.
-     * Takes priority over `externalImageUrl` if both are provided.
-     *
-     * @example "virtual-staging/temp/abc123.jpg"
-     */
-    @IsOptional()
-    @IsString()
-    gcsStorageKey?: string;
+  /**
+   * Google Cloud Storage key for internally uploaded images.
+   * Use this when the image was uploaded via `/ai/virtual-staging/upload-url`.
+   * Takes priority over `externalImageUrl` if both are provided.
+   *
+   * @example "virtual-staging/temp/abc123.jpg"
+   */
+  @IsOptional()
+  @IsString()
+  gcsStorageKey?: string;
 
-    /**
-     * @deprecated Use `gcsStorageKey` instead. Kept for backward compatibility.
-     */
-    @IsOptional()
-    @IsString()
-    imageKey?: string;
+  /**
+   * @deprecated Use `gcsStorageKey` instead. Kept for backward compatibility.
+   */
+  @IsOptional()
+  @IsString()
+  imageKey?: string;
 
-    /**
-     * External HTTP/HTTPS URL for remotely hosted images.
-     * Used when the image is hosted on an external service.
-     *
-     * @example "https://example.com/room.jpg"
-     */
-    @IsOptional()
-    @IsUrl()
-    externalImageUrl?: string;
+  /**
+   * External HTTP/HTTPS URL for remotely hosted images.
+   * Used when the image is hosted on an external service.
+   *
+   * @example "https://example.com/room.jpg"
+   */
+  @IsOptional()
+  @IsUrl()
+  externalImageUrl?: string;
 
-    /**
-     * @deprecated Use `externalImageUrl` instead. Kept for backward compatibility.
-     */
-    @IsOptional()
-    @IsUrl()
-    imageUrl?: string;
+  /**
+   * @deprecated Use `externalImageUrl` instead. Kept for backward compatibility.
+   */
+  @IsOptional()
+  @IsUrl()
+  imageUrl?: string;
 
-    /**
-     * Preferred interior design style for the staged room.
-     * If not specified, the AI will suggest an appropriate style.
-     *
-     * @example "modern"
-     */
-    @IsOptional()
-    @IsString()
-    @IsIn(DESIGN_STYLES)
-    preferredStyle?: string;
+  /**
+   * Preferred interior design style for the staged room.
+   * If not specified, the AI will suggest an appropriate style.
+   *
+   * @example "modern"
+   */
+  @IsOptional()
+  @IsString()
+  @IsIn(DESIGN_STYLES)
+  preferredStyle?: string;
 
-    /**
-     * Gets the effective GCS key (supporting both new and deprecated field names).
-     */
-    get effectiveGcsKey(): string | undefined {
-        return this.gcsStorageKey ?? this.imageKey;
-    }
+  /**
+   * Gets the effective GCS key (supporting both new and deprecated field names).
+   */
+  get effectiveGcsKey(): string | undefined {
+    return this.gcsStorageKey ?? this.imageKey;
+  }
 
-    /**
-     * Gets the effective external URL (supporting both new and deprecated field names).
-     */
-    get effectiveExternalUrl(): string | undefined {
-        return this.externalImageUrl ?? this.imageUrl;
-    }
+  /**
+   * Gets the effective external URL (supporting both new and deprecated field names).
+   */
+  get effectiveExternalUrl(): string | undefined {
+    return this.externalImageUrl ?? this.imageUrl;
+  }
 }
 
 export interface VirtualStagingQuotaDto {
-    /** Maximum number of generations available per Bolivia calendar day. */
-    limit: number;
+  /** Maximum number of generations available per Bolivia calendar day. */
+  limit: number;
 
-    /** Number of generations still available today. */
-    remaining: number;
+  /** Number of generations still available today. */
+  remaining: number;
 }
 
 /** Product from the catalog used as the visual reference for a generation. */
 export interface VirtualStagingProductDto {
-    id: string;
-    title: string;
-    description: string | null;
-    price: number;
-    imageUrl: string;
+  id: string;
+  condition: ProductCondition;
+  title: string;
+  description: string | null;
+  price: number;
+  imageUrl: string;
 }
 
 /**
@@ -121,33 +123,33 @@ export interface VirtualStagingProductDto {
  * - Processing metadata for monitoring
  */
 export interface VirtualStagingResponseDto {
-    /**
-     * AI analysis of the original room image.
-     * Includes detected room type, style, empty areas, and color palette.
-     */
-    analysis: RoomAnalysisResult;
+  /**
+   * AI analysis of the original room image.
+   * Includes detected room type, style, empty areas, and color palette.
+   */
+  analysis: RoomAnalysisResult;
 
-    /** Product explicitly selected by the user and used for this staging. */
-    selectedProduct: VirtualStagingProductDto;
+  /** Product explicitly selected by the user and used for this staging. */
+  selectedProduct: VirtualStagingProductDto;
 
-    /**
-     * Temporary signed URL of the generated staged image.
-     */
-    stagedImageUrl: string;
+  /**
+   * Temporary signed URL of the generated staged image.
+   */
+  stagedImageUrl: string;
 
-    /** ISO timestamp after which the signed result URL stops working. */
-    stagedImageExpiresAt: string;
+  /** ISO timestamp after which the signed result URL stops working. */
+  stagedImageExpiresAt: string;
 
-    /** Updated quota after completing this generation. */
-    quota: VirtualStagingQuotaDto;
+  /** Updated quota after completing this generation. */
+  quota: VirtualStagingQuotaDto;
 
-    /**
-     * Processing metadata for monitoring and debugging.
-     */
-    metadata: {
-        /** Total processing time in milliseconds */
-        processingTimeMs: number;
-        /** Number of products included in the response */
-        productsFound: number;
-    };
+  /**
+   * Processing metadata for monitoring and debugging.
+   */
+  metadata: {
+    /** Total processing time in milliseconds */
+    processingTimeMs: number;
+    /** Number of products included in the response */
+    productsFound: number;
+  };
 }

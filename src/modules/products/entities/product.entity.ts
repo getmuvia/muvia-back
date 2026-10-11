@@ -12,6 +12,7 @@ import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
 import { ProductAsset } from './product-asset.entity';
 import { ProductListing } from './product-listing.entity';
+import { ProductCondition } from '../enums/product-condition.enum';
 import { normalizedSearchSql } from '../../../common/search/search-text';
 
 export interface ProductSpecifications {
@@ -47,6 +48,14 @@ export class Product {
 
   @Column()
   title: string;
+
+  @Column({
+    type: 'enum',
+    enum: ProductCondition,
+    enumName: 'product_condition_enum',
+    default: ProductCondition.NEW,
+  })
+  condition: ProductCondition;
 
   @Column('text', { nullable: true })
   description: string;

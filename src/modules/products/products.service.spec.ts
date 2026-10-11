@@ -11,6 +11,9 @@ import { ProductAsset } from './entities/product-asset.entity';
 import { ProductListing } from './entities/product-listing.entity';
 import { Product } from './entities/product.entity';
 import { AssetType } from './enums/asset-type.enum';
+import { ProductCondition } from './enums/product-condition.enum';
+import { UpdateProductDto } from './dto/update-product.dto';
+import { plainToInstance } from 'class-transformer';
 import { ProductsService } from './products.service';
 
 type RepositoryMock = {
@@ -58,6 +61,7 @@ describe('ProductsService transactional writes', () => {
   let product: Product;
 
   const createDto: CreateProductDto = {
+    condition: ProductCondition.NEW,
     title: 'Desk',
     price: 120,
     stock: 4,
@@ -267,6 +271,25 @@ describe('ProductsService transactional writes', () => {
   it('does not create an embedding job for a price-only edit', async () => {
     await service.update(productId, sellerId, { price: 130 });
     expect(embeddingService.document).not.toHaveBeenCalled();
+    expect(embeddingService.recordChange).not.toHaveBeenCalled();
+  });
+
+  it('preserves a used condition when a transformed PATCH only changes price', async () => {
+    product.condition = ProductCondition.USED;
+    await service.update(
+      productId,
+      sellerId,
+      plainToInstance(UpdateProductDto, { price: 130 }),
+    );
+    expect(product.condition).toBe(ProductCondition.USED);
+  });
+
+  it('edits condition without changing the search document', async () => {
+    product.condition = ProductCondition.NEW;
+    await service.update(productId, sellerId, {
+      condition: ProductCondition.USED,
+    });
+    expect(product.condition).toBe(ProductCondition.USED);
     expect(embeddingService.recordChange).not.toHaveBeenCalled();
   });
 

@@ -216,7 +216,7 @@ export class ProductsService {
     sellerId: string,
     dto: UpdateProductDto,
   ): Promise<Product> {
-    const { assets, ...productData } = dto;
+    const { assets, condition, ...productData } = dto;
     if (assets !== undefined) {
       const product = await this.requireProduct(id, this.productRepository);
       this.validateOwnership(product, sellerId);
@@ -244,6 +244,7 @@ export class ProductsService {
         );
 
         Object.assign(product, productData);
+        if (condition !== undefined) product.condition = condition;
         await productRepository.save(product);
 
         if (dto.price !== undefined || dto.stock !== undefined) {
@@ -536,6 +537,12 @@ export class ProductsService {
     queryBuilder: SelectQueryBuilder<Product>,
     filters: Partial<ProductFilterDto>,
   ): void {
+    if (filters.condition !== undefined) {
+      queryBuilder.andWhere('product.condition = :condition', {
+        condition: filters.condition,
+      });
+    }
+
     if (filters.search) {
       const search = normalizeSearchText(filters.search);
       queryBuilder.andWhere(
