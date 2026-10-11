@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { ProductMeasurementFilter } from '../../../common/search/product-measurement';
 import { VectorService } from '../../ai/services/vector/vector.service';
 import { MarketsService } from '../../markets/markets.service';
+import { ProductCondition } from '../../products/enums/product-condition.enum';
 import { HybridSearchDto } from '../dto/hybrid-search.dto';
 import { SearchQueryDto } from '../dto/search-query.dto';
 import type { HybridSearchResponseDto } from '../dto/search-response.dto';
@@ -35,6 +36,7 @@ export class SearchService {
       limit = SEARCH.DEFAULT_LIMIT,
       marketCode = 'BO',
       locale = 'es-BO',
+      condition,
     } = dto;
     await this.marketsService.requireActive(marketCode);
     const { intent, interpretation } = await this.searchIntentService.resolve(
@@ -60,9 +62,15 @@ export class SearchService {
             fetchLimit,
             marketCode,
             intent.measurement,
+            condition,
           )
         : Promise.resolve([]),
-      this.productLexicalRepository.search(intent, fetchLimit, marketCode),
+      this.productLexicalRepository.search(
+        intent,
+        fetchLimit,
+        marketCode,
+        condition,
+      ),
     ]);
     const { results, relatedResults } = this.searchRankingService.rank(
       semanticResults,
@@ -97,6 +105,7 @@ export class SearchService {
     limit: number,
     marketCode: string,
     measurement?: ProductMeasurementFilter,
+    condition?: ProductCondition,
   ): Promise<SearchProductResult[]> {
     if (!this.vectorService.isAvailable()) {
       this.logger.warn('VectorService unavailable, skipping semantic search');
@@ -111,6 +120,7 @@ export class SearchService {
         SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
         marketCode,
         measurement,
+        condition,
       );
     } catch (error: unknown) {
       this.logger.error(`Semantic search failed: ${this.errorMessage(error)}`);

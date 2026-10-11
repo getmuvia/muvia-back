@@ -9,6 +9,7 @@ import {
 } from '../../../common/search/product-measurement';
 import { AI_ENV_KEYS } from '../../../config/ai.config';
 import { Product } from '../../products/entities/product.entity';
+import { ProductCondition } from '../../products/enums/product-condition.enum';
 import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../ai/constants/ai.constants';
 import type { SearchProductResult } from '../interfaces/search-result.interface';
 
@@ -37,20 +38,26 @@ export class ProductVectorRepository {
     threshold: number,
     marketCode = 'BO',
     measurement?: ProductMeasurementFilter,
+    condition?: ProductCondition,
   ): Promise<SearchProductResult[]> {
+    const parameters: unknown[] = [
+      embedding,
+      threshold,
+      marketCode,
+      limit,
+      this.embeddingModel,
+    ];
+    if (measurement) {
+      parameters.push(
+        VALID_PRODUCT_DIMENSION_PATTERN,
+        measurement.maxDimensionCm,
+      );
+    }
+    if (condition !== undefined) parameters.push(condition);
+
     const raw = await this.repository.query<RawSearchProductResult[]>(
-      this.getSimilarityQuery(measurement),
-      measurement
-        ? [
-            embedding,
-            threshold,
-            marketCode,
-            limit,
-            this.embeddingModel,
-            VALID_PRODUCT_DIMENSION_PATTERN,
-            measurement.maxDimensionCm,
-          ]
-        : [embedding, threshold, marketCode, limit, this.embeddingModel],
+      this.getSimilarityQuery(measurement, condition),
+      parameters,
     );
 
     return raw.map((item) => ({
@@ -59,10 +66,17 @@ export class ProductVectorRepository {
     }));
   }
 
-  private getSimilarityQuery(measurement?: ProductMeasurementFilter): string {
+  private getSimilarityQuery(
+    measurement?: ProductMeasurementFilter,
+    condition?: ProductCondition,
+  ): string {
     const dimensionFilter = measurement
       ? `AND ${productDimensionCmSql('p', measurement.dimension, '$6')} <= $7`
       : '';
+    const conditionFilter =
+      condition !== undefined
+        ? `AND p.condition = $${measurement ? 8 : 6}`
+        : '';
 
     return `
       SELECT
@@ -95,6 +109,7 @@ export class ProductVectorRepository {
         AND p.embedding_revision = p.search_revision
         AND p.embedding_content_version = ${PRODUCT_EMBEDDING_CONTENT_VERSION}
         ${dimensionFilter}
+        ${conditionFilter}
       ORDER BY p.embedding <=> $1::vector ASC
       LIMIT $4
     `;

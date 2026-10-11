@@ -6,6 +6,7 @@ import {
   productDimensionCmSql,
 } from '../../../common/search/product-measurement';
 import { Product } from '../../products/entities/product.entity';
+import { ProductCondition } from '../../products/enums/product-condition.enum';
 import type { SearchIntent } from '../interfaces/search-intent.interface';
 
 /** Encapsulates normalized text retrieval for catalog search. */
@@ -20,6 +21,7 @@ export class ProductLexicalRepository {
     intent: SearchIntent,
     limit: number,
     marketCode: string,
+    condition?: ProductCondition,
   ): Promise<Product[]> {
     const terms = [...new Set([...intent.terms, ...intent.aliases])];
     if (!terms.length && !intent.measurement) return [];
@@ -64,6 +66,10 @@ export class ProductLexicalRepository {
         conditions.length ? `(${conditions.join(' OR ')})` : '1 = 1',
         parameters,
       );
+
+    if (condition !== undefined) {
+      queryBuilder.andWhere('product.condition = :condition', { condition });
+    }
 
     if (intent.measurement) {
       queryBuilder.andWhere(

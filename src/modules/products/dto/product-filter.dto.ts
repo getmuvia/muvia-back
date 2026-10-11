@@ -12,10 +12,15 @@ import {
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 import { ProductDimension } from '../../../common/search/product-measurement';
+import { ProductCondition } from '../enums/product-condition.enum';
 
 export { ProductDimension };
 
 export class ProductFilterDto {
+  @ValidateIf((_dto, value: unknown) => value !== undefined)
+  @IsEnum(ProductCondition)
+  condition?: ProductCondition;
+
   @IsString()
   @Matches(/^[A-Z]{2}$/)
   @Transform(({ value }) => {

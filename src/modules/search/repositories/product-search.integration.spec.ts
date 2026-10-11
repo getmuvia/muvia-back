@@ -10,6 +10,11 @@ import { normalizedSearchSql } from '../../../common/search/search-text';
 import { ProductDimension } from '../../../common/search/product-measurement';
 import configuredSource from '../../../database/data-source';
 import { AddProductSearchText1790726401000 } from '../../../database/migrations/1790726401000-add-product-search-text';
+import { AddProductCondition1791676800000 } from '../../../database/migrations/1791676800000-add-product-condition';
+import { ProductCondition } from '../../products/enums/product-condition.enum';
+import { ProductVectorRepository } from './product-vector.repository';
+import { ConfigService } from '@nestjs/config';
+import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../ai/constants/ai.constants';
 import { EmbeddingService } from '../../ai/services/embedding/embedding.service';
 import { FilesService } from '../../files/files.service';
 import { Category } from '../../categories/entities/category.entity';
@@ -185,6 +190,105 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       search_keywords: ' ergonomico azul marino ',
       search_material: ' madera ',
     });
+  });
+
+  it('migrates existing products to NEW and enforces valid, non-null conditions', async () => {
+    const conditionMigration = new AddProductCondition1791676800000();
+    await conditionMigration.down(runner);
+    const existing = await seed('Existing desk');
+    await conditionMigration.up(runner);
+    expect((await products.findOneByOrFail({ id: existing })).condition).toBe(
+      ProductCondition.NEW,
+    );
+    const created = await seed('New desk');
+    expect((await products.findOneByOrFail({ id: created })).condition).toBe(
+      ProductCondition.NEW,
+    );
+    await expect(
+      db.query('UPDATE products SET condition = NULL WHERE id = $1', [created]),
+    ).rejects.toMatchObject({ code: '23502' });
+    await expect(
+      db.query("UPDATE products SET condition = 'SEMINUEVO' WHERE id = $1", [
+        created,
+      ]),
+    ).rejects.toMatchObject({ code: '22P02' });
+  });
+
+  it('filters condition before catalog pagination and lexical or vector retrieval limits', async () => {
+    const fresh = await seed('Silla nueva', { width: 60 });
+    const used = await seed('Silla usada', { width: 60 });
+    const wideUsed = await seed('Silla usada ancha', { width: 150 });
+    await products.update([used, wideUsed], {
+      condition: ProductCondition.USED,
+    });
+    const pages = await Promise.all(
+      [1, 2].map((page) =>
+        catalog.findAll({
+          condition: ProductCondition.USED,
+          page,
+          limit: 1,
+        }),
+      ),
+    );
+    expect(
+      pages.every((page) => page.total === 2 && page.totalPages === 2),
+    ).toBe(true);
+    expect(
+      new Set(pages.flatMap((page) => page.data.map((product) => product.id))),
+    ).toEqual(new Set([used, wideUsed]));
+    expect((await catalog.findAll({})).total).toBe(3);
+    expect(
+      await lexical.search(intent(['silla']), 1, 'BO', ProductCondition.USED),
+    ).toHaveLength(1);
+    expect(
+      (await lexical.search(intent(['silla']), 5, 'BO', ProductCondition.USED))
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual([used, wideUsed].sort());
+
+    const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    const usedVector = JSON.stringify([
+      0.9,
+      0.1,
+      ...Array<number>(766).fill(0),
+    ]);
+    for (const id of [fresh, used, wideUsed]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector,
+        embedding_model = 'condition-test', embedding_revision = search_revision,
+        embedding_content_version = $3 WHERE id = $1`,
+        [
+          id,
+          id === fresh ? queryVector : usedVector,
+          PRODUCT_EMBEDDING_CONTENT_VERSION,
+        ],
+      );
+    }
+    const vectorRepository = new ProductVectorRepository(products, {
+      getOrThrow: () => 'condition-test',
+    } as unknown as ConfigService);
+    const limited = await vectorRepository.findBySimilarity(
+      queryVector,
+      1,
+      0.1,
+      'BO',
+      undefined,
+      ProductCondition.USED,
+    );
+    expect(limited).toHaveLength(1);
+    expect([used, wideUsed]).toContain(limited[0].id);
+    const measured = await vectorRepository.findBySimilarity(
+      queryVector,
+      5,
+      0.1,
+      'BO',
+      {
+        dimension: ProductDimension.WIDTH,
+        maxDimensionCm: 70,
+      },
+      ProductCondition.USED,
+    );
+    expect(measured.map((product) => product.id)).toEqual([used]);
   });
 
   it('preserves generated columns and GIN indexes during development schema synchronization', async () => {
