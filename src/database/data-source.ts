@@ -20,6 +20,7 @@ import { ProductEmbeddingJob } from '../modules/ai/entities/product-embedding-jo
 import { AddDurableEmbeddingJobs1790726400000 } from './migrations/1790726400000-add-durable-embedding-jobs';
 import { AddProductSearchText1790726401000 } from './migrations/1790726401000-add-product-search-text';
 import { AddProductCondition1791676800000 } from './migrations/1791676800000-add-product-condition';
+import { AddVendorRepairs1791763200000 } from './migrations/1791763200000-add-vendor-repairs';
 
 const host = process.env.DB_HOST;
 const usesCloudSqlSocket = host?.startsWith('/');
@@ -59,6 +60,7 @@ export default new DataSource({
     AddDurableEmbeddingJobs1790726400000,
     AddProductSearchText1790726401000,
     AddProductCondition1791676800000,
+    AddVendorRepairs1791763200000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,

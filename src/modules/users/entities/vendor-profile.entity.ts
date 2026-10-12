@@ -2,6 +2,7 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   Column,
+  Check,
   OneToOne,
   OneToMany,
   JoinColumn,
@@ -18,6 +19,12 @@ export interface SocialLink {
 }
 
 @Entity('vendor_profiles')
+@Check(
+  'ck_vendor_repair_settings',
+  `(offers_repairs AND repair_scope IS NOT NULL AND length(btrim(repair_scope)) > 0)
+    OR (NOT offers_repairs AND repair_scope IS NULL AND repair_details IS NULL
+      AND NOT repairs_external_products)`,
+)
 export class VendorProfile {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -49,10 +56,34 @@ export class VendorProfile {
   @Column({ default: false })
   isVerified: boolean;
 
+  @Column({ name: 'offers_repairs', default: false })
+  offersRepairs: boolean;
+
+  @Column({
+    name: 'repair_scope',
+    type: 'varchar',
+    length: 160,
+    nullable: true,
+  })
+  repairScope: string | null;
+
+  @Column({
+    name: 'repair_details',
+    type: 'varchar',
+    length: 500,
+    nullable: true,
+  })
+  repairDetails: string | null;
+
+  @Column({ name: 'repairs_external_products', default: false })
+  repairsExternalProducts: boolean;
+
   @OneToOne(() => User, (user) => user.vendorProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'user_id' })
   user: User;
 
-  @OneToMany(() => VendorLocation, (location) => location.vendorProfile, { cascade: true })
+  @OneToMany(() => VendorLocation, (location) => location.vendorProfile, {
+    cascade: true,
+  })
   locations: VendorLocation[];
 }
