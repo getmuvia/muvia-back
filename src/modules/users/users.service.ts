@@ -4,6 +4,7 @@ import {
   NotFoundException,
   BadRequestException,
   UnauthorizedException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -20,6 +21,8 @@ import { MarketsService } from '../markets/markets.service';
 import { FilesService } from '../files/files.service';
 import { FileUploadPurpose } from '../files/file-upload-policy';
 import { VendorLocationDto } from './dto/create-vendor-profile.dto';
+import { resolveVendorRepairSettings } from './utils/vendor-repair-settings';
+import type { PublicVendorResponse } from './responses/public-vendor.response';
 import {
   createErrorPayload,
   ERROR_CODES,
@@ -139,18 +142,38 @@ export class UsersService {
     });
   }
 
-  async findOnePublic(id: string): Promise<User> {
+  async findOnePublic(id: string): Promise<PublicVendorResponse> {
     const user = await this.userRepository.findOne({
       where: { id },
       relations: ['vendorProfile'],
       select: ['id', 'role', 'createdAt', 'vendorProfile'], // Explicitly select safe fields
     });
 
-    if (!user) {
-      throw new NotFoundException(`User with ID ${id} not found`);
+    if (!user || !this.isVendor(user.role) || !user.vendorProfile) {
+      throw new NotFoundException(`Vendor with ID ${id} not found`);
     }
 
-    return user;
+    const profile = user.vendorProfile;
+    return {
+      id: user.id,
+      role: user.role,
+      createdAt: user.createdAt,
+      vendorProfile: {
+        id: profile.id,
+        businessName: profile.businessName,
+        description: profile.description,
+        logoUrl: profile.logoUrl,
+        coverImage: profile.coverImage,
+        aboutMe: profile.aboutMe,
+        socialLinks: profile.socialLinks,
+        businessHours: profile.businessHours,
+        isVerified: profile.isVerified,
+        offersRepairs: profile.offersRepairs,
+        repairScope: profile.repairScope,
+        repairDetails: profile.repairDetails,
+        repairsExternalProducts: profile.repairsExternalProducts,
+      },
+    };
   }
 
   async update(id: string, updateUserDto: UpdateUserDto): Promise<User> {
@@ -163,10 +186,22 @@ export class UsersService {
     const user = await this.findOne(id);
 
     const { vendorProfile, ...userData } = updateUserDto;
+    if (vendorProfile && !this.isVendor(user.role)) {
+      throw new ForbiddenException(
+        createErrorPayload(
+          ERROR_CODES.VENDOR_PROFILE_FORBIDDEN,
+          'Only vendor accounts can update a vendor profile',
+        ),
+      );
+    }
     this.userRepository.merge(user, userData);
 
     if (vendorProfile && this.isVendor(user.role)) {
       const { location, ...profileData } = vendorProfile;
+      const repairSettings = resolveVendorRepairSettings(
+        user.vendorProfile,
+        profileData,
+      );
       for (const field of ['logoUrl', 'coverImage'] as const) {
         const url = profileData[field];
         if (url && url !== user.vendorProfile?.[field]) {
@@ -181,9 +216,13 @@ export class UsersService {
         user.vendorProfile = this.vendorProfileRepository.create({
           userId: user.id,
           ...profileData,
+          ...repairSettings,
         });
       } else {
-        this.vendorProfileRepository.merge(user.vendorProfile, profileData);
+        this.vendorProfileRepository.merge(user.vendorProfile, {
+          ...profileData,
+          ...repairSettings,
+        });
       }
       await this.userRepository.save(user);
       await this.upsertPrimaryLocation(user.vendorProfile, location);
@@ -260,6 +299,9 @@ export class UsersService {
         'Vendor profile is required for vendor accounts',
       );
     }
+    if (this.isVendor(dto.role) && dto.vendorProfile) {
+      resolveVendorRepairSettings(null, dto.vendorProfile);
+    }
   }
 
   private isVendor(role: UserRole): boolean {
@@ -271,9 +313,11 @@ export class UsersService {
     profileData: CreateUserDto['vendorProfile'],
   ): Promise<VendorProfile> {
     const { location, ...data } = profileData!;
+    const repairSettings = resolveVendorRepairSettings(null, data);
     const vendorProfile = this.vendorProfileRepository.create({
       userId,
       ...data,
+      ...repairSettings,
     });
     const savedProfile = await this.vendorProfileRepository.save(vendorProfile);
     await this.upsertPrimaryLocation(savedProfile, location);
