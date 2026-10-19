@@ -1,5 +1,8 @@
 import { SearchService } from '../../services/search.service';
-import type { ResolvedSearchIntent } from '../../interfaces/search-intent.interface';
+import type {
+  SearchIntent,
+  ResolvedSearchIntent,
+} from '../../interfaces/search-intent.interface';
 import { SearchRankingService } from '../../services/search-ranking.service';
 import { SearchIntentService } from '../../services/search-intent.service';
 import { ProductLexicalRepository } from '../../repositories/product-lexical.repository';
@@ -8,54 +11,68 @@ import { VectorService } from '../../../ai/services/vector/vector.service';
 import { MarketsService } from '../../../markets/markets.service';
 import { ProductDimension } from '../../../../common/search/product-measurement';
 import { ProductCondition } from '../../../products/enums/product-condition.enum';
+import type { SearchProductResult } from '../../interfaces/search-result.interface';
+import { SEARCH } from '../../search.constants';
+
+const price = {
+  currencyCode: 'BOB',
+  maximum: { amount: 2000, inclusive: false },
+};
+const measurements = [
+  {
+    dimension: ProductDimension.WIDTH,
+    maximum: { valueCm: 180, inclusive: true },
+  },
+];
+const defaultIntent: SearchIntent = {
+  text: 'escritorio',
+  terms: ['escritorio'],
+  categoryCode: 'DESK',
+  price,
+  measurements,
+  condition: ProductCondition.USED,
+};
+const market = { currencyCode: 'BOB', exchangeRates: {} };
+const interpretation: ResolvedSearchIntent['interpretation'] = {
+  source: 'ai',
+  summary: 'escritorio',
+};
+
+function setup(resolvedIntent: SearchIntent = defaultIntent) {
+  const semantic = {
+    isAvailable: jest.fn(() => true),
+    generateEmbedding: jest.fn().mockResolvedValue([1]),
+    toVectorString: () => '[1]',
+  };
+  const vectors = { findBySimilarity: jest.fn().mockResolvedValue([]) };
+  const literal = {
+    search: jest
+      .fn<
+        ReturnType<ProductLexicalRepository['search']>,
+        Parameters<ProductLexicalRepository['search']>
+      >()
+      .mockResolvedValue([]),
+  };
+  const intent = {
+    resolve: jest
+      .fn()
+      .mockResolvedValue({ intent: resolvedIntent, interpretation }),
+  };
+  const service = new SearchService(
+    semantic as unknown as VectorService,
+    vectors as unknown as ProductVectorRepository,
+    literal as unknown as ProductLexicalRepository,
+    intent as unknown as SearchIntentService,
+    new SearchRankingService(),
+    {
+      requireActive: jest.fn().mockResolvedValue(market),
+    } as unknown as MarketsService,
+  );
+  return { service, semantic, vectors, literal, intent };
+}
 
 describe('SearchService hybrid retrieval', () => {
-  const price = {
-    currencyCode: 'BOB',
-    maximum: { amount: 2000, inclusive: false },
-  };
-  const measurements = [
-    {
-      dimension: ProductDimension.WIDTH,
-      maximum: { valueCm: 180, inclusive: true },
-    },
-  ];
-  const market = { currencyCode: 'BOB', exchangeRates: {} };
-  const interpretation = { source: 'ai', summary: 'escritorio' };
-  function setup() {
-    const semantic = {
-      isAvailable: jest.fn(() => true),
-      generateEmbedding: jest.fn().mockResolvedValue([1]),
-      toVectorString: () => '[1]',
-    };
-    const vectors = { findBySimilarity: jest.fn().mockResolvedValue([]) };
-    const literal = { search: jest.fn().mockResolvedValue([]) };
-    const intent = {
-      resolve: jest.fn().mockResolvedValue({
-        intent: {
-          text: 'escritorio',
-          terms: ['escritorio'],
-          categoryCode: 'DESK',
-          price,
-          measurements,
-          condition: ProductCondition.USED,
-        },
-        interpretation,
-      }),
-    };
-    const service = new SearchService(
-      semantic as unknown as VectorService,
-      vectors as unknown as ProductVectorRepository,
-      literal as unknown as ProductLexicalRepository,
-      intent as unknown as SearchIntentService,
-      new SearchRankingService(),
-      {
-        requireActive: jest.fn().mockResolvedValue(market),
-      } as unknown as MarketsService,
-    );
-    return { service, semantic, vectors, literal, intent };
-  }
-  it('passes the same constraints to both retrieval paths before limiting', async () => {
+  it('passes the same effective query to both retrieval paths', async () => {
     const { service, vectors, literal, intent } = setup();
     const dto = {
       query: 'escritorio menor a 2000',
@@ -63,33 +80,32 @@ describe('SearchService hybrid retrieval', () => {
       limit: 2,
     };
     const result = await service.searchHybrid(dto);
+    const scope = { marketCode: 'BO', limit: 6 };
+    const filters = {
+      price,
+      measurements,
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      materialAliases: undefined,
+    };
     expect(intent.resolve).toHaveBeenCalledWith(
       dto.query,
       'es-BO',
       market,
       dto,
     );
-    expect(vectors.findBySimilarity).toHaveBeenCalledWith(
-      '[1]',
-      6,
-      expect.any(Number),
-      'BO',
-      measurements,
-      ProductCondition.USED,
-      price,
-      'DESK',
-      [],
-    );
+    expect(vectors.findBySimilarity).toHaveBeenCalledWith({
+      embedding: '[1]',
+      scope,
+      filters,
+      threshold: SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
+    });
     expect(literal.search).toHaveBeenCalledWith(
-      expect.objectContaining({ price, measurements }),
-      6,
-      'BO',
-      ProductCondition.USED,
-      'DESK',
-      [],
+      expect.objectContaining({ scope, filters }),
     );
     expect(result.interpretation).toEqual(interpretation);
   });
+
   it('continues literal retrieval when the embedding request fails', async () => {
     const { service, semantic, literal } = setup();
     semantic.generateEmbedding.mockRejectedValue(new Error('unavailable'));
@@ -99,64 +115,93 @@ describe('SearchService hybrid retrieval', () => {
     expect(literal.search).toHaveBeenCalledTimes(2);
     expect(semantic.generateEmbedding).toHaveBeenCalledTimes(1);
   });
-  it('retains semantic retrieval when the interpreter returns text without literal terms', async () => {
-    const { service, semantic, intent } = setup();
-    intent.resolve.mockResolvedValue({
-      intent: { text: 'escritorio', terms: [] },
-      interpretation,
-    } as never);
+
+  it('keeps literal retrieval available when embeddings are disabled', async () => {
+    const { service, semantic, vectors, literal } = setup();
+    semantic.isAvailable.mockReturnValue(false);
+    await service.searchHybrid({ query: 'escritorio', categoryCode: 'DESK' });
+    expect(semantic.generateEmbedding).not.toHaveBeenCalled();
+    expect(vectors.findBySimilarity).not.toHaveBeenCalled();
+    expect(literal.search).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains semantic retrieval when interpretation has text without literal criteria', async () => {
+    const { service, semantic } = setup({ text: 'escritorio', terms: [] });
     await service.searchHybrid({ query: 'escritorio' });
     expect(semantic.generateEmbedding).toHaveBeenCalledTimes(1);
   });
 
   it('does not request an embedding for a price-only interpretation', async () => {
-    const { service, semantic, intent } = setup();
-    intent.resolve.mockResolvedValue({
-      intent: { text: '', terms: [], price },
-      interpretation,
-    } as never);
+    const { service, semantic, literal } = setup({
+      text: '',
+      terms: [],
+      price,
+    });
     await service.searchHybrid({ query: 'hasta 2000' });
     expect(semantic.generateEmbedding).not.toHaveBeenCalled();
+    const [applied] = literal.search.mock.calls[0];
+    expect(applied.filters.price).toEqual(price);
   });
 
-  it('broadens an inferred category without weakening numeric or condition filters', async () => {
+  it('returns an empty response without retrieval for an empty interpretation', async () => {
+    const { service, semantic, vectors, literal } = setup({
+      text: '',
+      terms: [],
+    });
+    expect(await service.searchHybrid({ query: 'consulta' })).toEqual({
+      query: 'consulta',
+      interpretation,
+      results: [],
+      relatedResults: [],
+      count: 0,
+    });
+    expect(semantic.generateEmbedding).not.toHaveBeenCalled();
+    expect(vectors.findBySimilarity).not.toHaveBeenCalled();
+    expect(literal.search).not.toHaveBeenCalled();
+  });
+
+  it('broadens inferred categories while preserving mandatory constraints', async () => {
     const { service, semantic, vectors, literal } = setup();
-    const alternative = {
+    const alternative: SearchProductResult = {
       id: 'alternative',
       title: 'Escritorio',
+      description: null,
+      keywords: [],
       categoryCode: 'TABLE',
-      specifications: {},
+      categoryId: 'category',
+      specifications: null,
       price: 1000,
       currencyCode: 'BOB',
       similarity: 0.9,
+      stock: 1,
+      sellerId: 'seller',
+      imageUrl: null,
+      createdAt: new Date(),
     };
     vectors.findBySimilarity
       .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([alternative] as never);
+      .mockResolvedValueOnce([alternative]);
     const response = await service.searchHybrid({
       query: 'escritorio',
       limit: 2,
     });
-    expect(vectors.findBySimilarity).toHaveBeenNthCalledWith(
-      2,
-      '[1]',
-      6,
-      expect.any(Number),
-      'BO',
-      measurements,
-      ProductCondition.USED,
+    const scope = { marketCode: 'BO', limit: 6 };
+    const filters = {
       price,
-      undefined,
-      [],
-    );
+      measurements,
+      condition: ProductCondition.USED,
+      categoryCode: undefined,
+      materialAliases: [],
+    };
+    expect(vectors.findBySimilarity).toHaveBeenNthCalledWith(2, {
+      embedding: '[1]',
+      scope,
+      filters,
+      threshold: SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
+    });
     expect(literal.search).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ price, measurements }),
-      6,
-      'BO',
-      ProductCondition.USED,
-      undefined,
-      [],
+      expect.objectContaining({ scope, filters }),
     );
     expect(response.relatedResults.map((item) => item.id)).toEqual([
       'alternative',
@@ -165,40 +210,31 @@ describe('SearchService hybrid retrieval', () => {
   });
 
   it('keeps the selected category mandatory when broadening material suggestions', async () => {
-    const { service, literal, intent } = setup();
-    const resolved = (await intent.resolve()) as ResolvedSearchIntent;
-    intent.resolve.mockResolvedValue({
-      ...resolved,
-      intent: {
-        ...resolved.intent,
-        material: { label: 'Madera', aliases: ['madera', 'wood'] },
-      },
-    } as never);
+    const { service, literal } = setup({
+      ...defaultIntent,
+      material: { label: 'Madera', aliases: ['madera', 'wood'] },
+    });
     await service.searchHybrid({
       query: 'escritorio madera',
       categoryCode: 'DESK',
     });
-    expect(literal.search).toHaveBeenNthCalledWith(
-      1,
-      expect.anything(),
-      30,
-      'BO',
-      ProductCondition.USED,
-      'DESK',
-      ['madera', 'wood'],
+    const [primary, broader] = literal.search.mock.calls.map(
+      ([query]) => query.filters,
     );
-    expect(literal.search).toHaveBeenNthCalledWith(
-      2,
-      expect.anything(),
-      30,
-      'BO',
-      ProductCondition.USED,
-      'DESK',
-      [],
-    );
+    expect(primary).toMatchObject({
+      categoryCode: 'DESK',
+      materialAliases: ['madera', 'wood'],
+    });
+    expect(broader).toMatchObject({
+      categoryCode: 'DESK',
+      materialAliases: [],
+      price,
+      measurements,
+      condition: ProductCondition.USED,
+    });
   });
 
-  it('reuses embeddings across concurrent preview/catalog requests while retrieving each result set', async () => {
+  it('reuses embeddings across preview/catalog calls while retrieving current result sets', async () => {
     const { service, semantic, literal } = setup();
     await Promise.all([
       service.searchHybrid({
@@ -214,8 +250,12 @@ describe('SearchService hybrid retrieval', () => {
     ]);
     expect(semantic.generateEmbedding).toHaveBeenCalledTimes(1);
     expect(literal.search).toHaveBeenCalledTimes(2);
-    const calls = literal.search.mock.calls as unknown as [unknown, number][];
-    expect(calls.map((call) => call[1])).toEqual([30, 60]);
+    expect(literal.search).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: { marketCode: 'BO', limit: 30 } }),
+    );
+    expect(literal.search).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: { marketCode: 'BO', limit: 60 } }),
+    );
   });
 
   it('retries embeddings on the next search after a failure', async () => {
@@ -224,5 +264,17 @@ describe('SearchService hybrid retrieval', () => {
     await service.searchHybrid({ query: 'escritorio', categoryCode: 'DESK' });
     await service.searchHybrid({ query: 'escritorio', categoryCode: 'DESK' });
     expect(semantic.generateEmbedding).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the semantic batch endpoint defaults and response contract', async () => {
+    const { service, vectors } = setup();
+    expect(await service.searchBatch({ queries: ['escritorio'] })).toEqual([
+      { query: 'escritorio', products: [] },
+    ]);
+    expect(vectors.findBySimilarity).toHaveBeenCalledWith({
+      embedding: '[1]',
+      scope: { marketCode: 'BO', limit: 5 },
+      threshold: 0.5,
+    });
   });
 });

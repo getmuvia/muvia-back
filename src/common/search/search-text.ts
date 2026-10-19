@@ -27,6 +27,14 @@ export function matchesSearchTerm(text: string, term: string): boolean {
   return term.length > 0 && ` ${text}`.includes(` ${term}`);
 }
 
+export function searchTermPatterns(terms: readonly string[]): string[] {
+  return terms.map((term) => '% ' + normalizeSearchText(term) + '%');
+}
+
+export function searchPhrasePatterns(phrases: readonly string[]): string[] {
+  return phrases.map((phrase) => '% ' + normalizeSearchText(phrase) + ' %');
+}
+
 /** PostgreSQL 16 equivalent. Pass only source-controlled SQL expressions here. */
 export function normalizedSearchSql(expression: string): string {
   const unaccented = `regexp_replace(lower(normalize(COALESCE(${expression}, ''), NFD)), U&'[\\0300-\\036f]', '', 'g')`;

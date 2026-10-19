@@ -34,6 +34,14 @@ retrieval broadens inferred category/material preferences for related suggestion
 Selected categories, conditions, prices and measurements remain mandatory.
 Both retrieval passes share the same query embedding.
 
+Retrieval uses an internal SearchQuery that groups scope (market and limit),
+text criteria and effective filters. The lexical repository receives this query;
+the vector repository receives a named request with scope, filters, embedding
+and threshold. Interpretation remains a separate SearchIntent contract.
+SearchQuery owns eligibility checks and creates broader queries without mutating
+the primary filters. A broader query with no remaining criteria is not executed.
+Price SQL comparisons and text patterns are shared by both retrieval paths.
+
 Measurements support up to three distinct dimensions, each with minimum/maximum
 and inclusive/exclusive bounds. Exact sizes use equal inclusive bounds. SQL
 compares all dimensions after converting stored cm/m/in units to centimeters.

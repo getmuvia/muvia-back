@@ -1,18 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import type { ProductPriceFilter } from '../../../common/search/product-price';
+import { productPriceFiltersSql } from '../../../common/search/product-price';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import {
-  type ProductMeasurementFilter,
-  productMeasurementFiltersSql,
-} from '../../../common/search/product-measurement';
-import { normalizeSearchText } from '../../../common/search/search-text';
+import { productMeasurementFiltersSql } from '../../../common/search/product-measurement';
+import { searchPhrasePatterns } from '../../../common/search/search-text';
 import { AI_ENV_KEYS } from '../../../config/ai.config';
 import { Product } from '../../products/entities/product.entity';
-import { ProductCondition } from '../../products/enums/product-condition.enum';
 import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../ai/constants/ai.constants';
 import type { SearchProductResult } from '../interfaces/search-result.interface';
+import type { VectorSearchRequest } from '../search-query';
 
 type RawSearchProductResult = Omit<SearchProductResult, 'similarity'> & {
   similarity: string | number;
@@ -33,48 +30,43 @@ export class ProductVectorRepository {
     );
   }
 
-  async findBySimilarity(
-    embedding: string,
-    limit: number,
-    threshold: number,
-    marketCode = 'BO',
-    measurements: ProductMeasurementFilter[] = [],
-    condition?: ProductCondition,
-    price?: ProductPriceFilter,
-    categoryCode?: string,
-    materialAliases: string[] = [],
-  ): Promise<SearchProductResult[]> {
+  async findBySimilarity({
+    embedding,
+    scope,
+    threshold,
+    filters = {},
+  }: VectorSearchRequest): Promise<SearchProductResult[]> {
     const parameters: unknown[] = [
       embedding,
       threshold,
-      marketCode,
-      limit,
+      scope.marketCode,
+      scope.limit,
       this.embeddingModel,
     ];
-    const filters: string[] = [];
+    const constraints: string[] = [];
     const bind = (value: unknown): string => `$${parameters.push(value)}`;
-    filters.push(...productMeasurementFiltersSql('p', measurements, bind));
-    if (materialAliases.length)
-      filters.push(
-        `p.search_material LIKE ANY(${bind(materialAliases.map((alias) => '% ' + normalizeSearchText(alias) + ' %'))}::text[])`,
+    const { measurements, materialAliases, condition, categoryCode, price } =
+      filters;
+    constraints.push(
+      ...productMeasurementFiltersSql('p', measurements ?? [], bind),
+    );
+    if (materialAliases?.length)
+      constraints.push(
+        `p.search_material LIKE ANY(${bind(searchPhrasePatterns(materialAliases))}::text[])`,
       );
     if (condition !== undefined)
-      filters.push(`p.condition = ${bind(condition)}`);
-    if (categoryCode) filters.push(`category.code = ${bind(categoryCode)}`);
-    if (price) {
-      filters.push(`listing.currency_code = ${bind(price.currencyCode)}`);
-      if (price.minimum)
-        filters.push(
-          `listing.price ${price.minimum.inclusive ? '>=' : '>'} ${bind(price.minimum.amount.toFixed(2))}`,
-        );
-      if (price.maximum)
-        filters.push(
-          `listing.price ${price.maximum.inclusive ? '<=' : '<'} ${bind(price.maximum.amount.toFixed(2))}`,
-        );
-    }
+      constraints.push(`p.condition = ${bind(condition)}`);
+    if (categoryCode) constraints.push(`category.code = ${bind(categoryCode)}`);
+    constraints.push(
+      ...productPriceFiltersSql(
+        price,
+        { currency: 'listing.currency_code', amount: 'listing.price' },
+        bind,
+      ),
+    );
 
     const raw = await this.repository.query<RawSearchProductResult[]>(
-      this.getSimilarityQuery(filters),
+      this.getSimilarityQuery(constraints),
       parameters,
     );
 

@@ -327,11 +327,29 @@ describe('Durable embeddings against PostgreSQL + pgvector', () => {
 
   it('excludes unverified and outdated vectors from semantic results', async () => {
     const search = new ProductVectorRepository(storage, configuration());
-    expect(await search.findBySimilarity('[1,0,0]', 5, 0.1)).toEqual([]);
+    expect(
+      await search.findBySimilarity({
+        embedding: '[1,0,0]',
+        scope: { limit: 5, marketCode: 'BO' },
+        threshold: 0.1,
+      }),
+    ).toEqual([]);
     await jobs.complete(await claim(await queue()), '[1,0,0]');
-    expect(await search.findBySimilarity('[1,0,0]', 5, 0.1)).toHaveLength(1);
+    expect(
+      await search.findBySimilarity({
+        embedding: '[1,0,0]',
+        scope: { limit: 5, marketCode: 'BO' },
+        threshold: 0.1,
+      }),
+    ).toHaveLength(1);
     await edit('Changed desk');
-    expect(await search.findBySimilarity('[1,0,0]', 5, 0.1)).toEqual([]);
+    expect(
+      await search.findBySimilarity({
+        embedding: '[1,0,0]',
+        scope: { limit: 5, marketCode: 'BO' },
+        threshold: 0.1,
+      }),
+    ).toEqual([]);
   });
 
   it('bounds reconciliation batches and cascades jobs when a product is removed', async () => {

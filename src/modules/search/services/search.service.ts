@@ -1,9 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { ProductMeasurementFilter } from '../../../common/search/product-measurement';
-import type { ProductPriceFilter } from '../../../common/search/product-price';
 import { VectorService } from '../../ai/services/vector/vector.service';
 import { MarketsService } from '../../markets/markets.service';
-import { ProductCondition } from '../../products/enums/product-condition.enum';
 import { HybridSearchDto } from '../dto/hybrid-search.dto';
 import { SearchQueryDto } from '../dto/search-query.dto';
 import type { HybridSearchResponseDto } from '../dto/search-response.dto';
@@ -14,6 +11,7 @@ import type {
 import { ProductLexicalRepository } from '../repositories/product-lexical.repository';
 import { ProductVectorRepository } from '../repositories/product-vector.repository';
 import { SEARCH } from '../search.constants';
+import { SearchQuery } from '../search-query';
 import { SearchIntentService } from './search-intent.service';
 import { SearchRankingService } from './search-ranking.service';
 import { SearchQueryCache } from './search-query-cache';
@@ -49,15 +47,11 @@ export class SearchService {
       dto,
     );
 
-    if (
-      !intent.text &&
-      !intent.terms.length &&
-      !intent.productTerms?.length &&
-      !intent.measurements?.length &&
-      !intent.price &&
-      !intent.categoryCode &&
-      !intent.condition
-    ) {
+    const searchQuery = SearchQuery.fromIntent({
+      scope: { marketCode, limit: limit * SEARCH.FETCH_MULTIPLIER },
+      intent,
+    });
+    if (!searchQuery.hasSearchCriteria()) {
       return {
         query,
         interpretation,
@@ -67,55 +61,24 @@ export class SearchService {
       };
     }
 
-    const fetchLimit = limit * SEARCH.FETCH_MULTIPLIER;
     const embedding =
-      intent.text && this.vectorService.isAvailable()
-        ? this.createQueryEmbedding(intent.text)
+      searchQuery.criteria.text && this.vectorService.isAvailable()
+        ? this.createQueryEmbedding(searchQuery.criteria.text)
         : undefined;
-    const retrieve = (categoryCode?: string, materialAliases: string[] = []) =>
-      Promise.all([
-        embedding
-          ? this.performSemanticSearch(
-              embedding,
-              fetchLimit,
-              marketCode,
-              intent.measurements,
-              intent.condition,
-              intent.price,
-              categoryCode,
-              materialAliases,
-            )
-          : Promise.resolve([]),
-        this.productLexicalRepository.search(
-          intent,
-          fetchLimit,
-          marketCode,
-          intent.condition,
-          categoryCode,
-          materialAliases,
-        ),
-      ]);
-    const [semanticResults, lexicalResults] = await retrieve(
-      intent.categoryCode,
-      intent.material?.aliases,
-    );
+    const candidates = await this.retrieveCandidates(searchQuery, embedding);
     let ranked = this.searchRankingService.rank(
-      semanticResults,
-      lexicalResults,
+      candidates.semantic,
+      candidates.lexical,
       intent,
     );
-    if (
-      ranked.results.length < limit &&
-      ((!dto.categoryCode && intent.categoryCode) ||
-        intent.material?.aliases.length)
-    ) {
-      // Broaden inferred preferences only; buyer-selected and numeric filters remain mandatory.
-      const [broaderSemantic, broaderLexical] = await retrieve(
-        dto.categoryCode,
-      );
+    const broaderQuery = searchQuery.broaden(dto.categoryCode);
+    const shouldBroadenSearch =
+      broaderQuery !== undefined && ranked.results.length < limit;
+    if (shouldBroadenSearch) {
+      const broader = await this.retrieveCandidates(broaderQuery, embedding);
       ranked = this.searchRankingService.rank(
-        [...semanticResults, ...broaderSemantic],
-        [...lexicalResults, ...broaderLexical],
+        [...candidates.semantic, ...broader.semantic],
+        [...candidates.lexical, ...broader.lexical],
         intent,
       );
     }
@@ -143,33 +106,29 @@ export class SearchService {
     );
   }
 
-  private async performSemanticSearch(
-    embedding: Promise<string>,
-    limit: number,
-    marketCode: string,
-    measurements: ProductMeasurementFilter[] = [],
-    condition?: ProductCondition,
-    price?: ProductPriceFilter,
-    categoryCode?: string,
-    materialAliases: string[] = [],
-  ): Promise<SearchProductResult[]> {
-    if (!this.vectorService.isAvailable()) {
-      this.logger.warn('VectorService unavailable, skipping semantic search');
-      return [];
-    }
+  private async retrieveCandidates(
+    query: SearchQuery,
+    embedding?: Promise<string>,
+  ) {
+    const [semantic, lexical] = await Promise.all([
+      this.performSemanticSearch(query, embedding),
+      this.productLexicalRepository.search(query),
+    ]);
+    return { semantic, lexical };
+  }
 
+  private async performSemanticSearch(
+    query: SearchQuery,
+    embedding?: Promise<string>,
+  ): Promise<SearchProductResult[]> {
+    if (!embedding) return [];
     try {
-      return await this.productVectorRepository.findBySimilarity(
-        await embedding,
-        limit,
-        SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
-        marketCode,
-        measurements,
-        condition,
-        price,
-        categoryCode,
-        materialAliases,
-      );
+      return await this.productVectorRepository.findBySimilarity({
+        embedding: await embedding,
+        scope: query.scope,
+        filters: query.filters,
+        threshold: SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
+      });
     } catch (error: unknown) {
       this.logger.error(`Semantic search failed: ${this.errorMessage(error)}`);
       return [];
@@ -183,11 +142,11 @@ export class SearchService {
   ): Promise<SearchResult> {
     try {
       const embedding = await this.createQueryEmbedding(query);
-      const products = await this.productVectorRepository.findBySimilarity(
+      const products = await this.productVectorRepository.findBySimilarity({
         embedding,
-        limit,
+        scope: { marketCode: 'BO', limit },
         threshold,
-      );
+      });
       return { query, products };
     } catch (error: unknown) {
       this.logger.error(`Batch search failed: ${this.errorMessage(error)}`);

@@ -1,11 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { normalizeSearchText } from '../../../common/search/search-text';
+import { Repository, type SelectQueryBuilder } from 'typeorm';
+import {
+  normalizeSearchText,
+  searchPhrasePatterns,
+  searchTermPatterns,
+} from '../../../common/search/search-text';
 import { productMeasurementFiltersSql } from '../../../common/search/product-measurement';
+import { productPriceFiltersSql } from '../../../common/search/product-price';
 import { Product } from '../../products/entities/product.entity';
-import { ProductCondition } from '../../products/enums/product-condition.enum';
-import type { SearchIntent } from '../interfaces/search-intent.interface';
+import { SearchQuery, type SearchFilters } from '../search-query';
 
 @Injectable()
 export class ProductLexicalRepository {
@@ -13,27 +17,9 @@ export class ProductLexicalRepository {
     @InjectRepository(Product) private readonly products: Repository<Product>,
   ) {}
 
-  async search(
-    intent: SearchIntent,
-    limit: number,
-    marketCode: string,
-    condition?: ProductCondition,
-    categoryCode?: string,
-    materialAliases: string[] = intent.material?.aliases ?? [],
-  ): Promise<Product[]> {
-    const terms = [
-      ...new Set([...intent.terms, ...(intent.productTerms ?? [])]),
-    ];
-    if (
-      !terms.length &&
-      !intent.measurements?.length &&
-      !intent.price &&
-      !intent.categoryCode &&
-      !condition &&
-      !categoryCode &&
-      !materialAliases.length
-    )
-      return [];
+  async search(search: SearchQuery): Promise<Product[]> {
+    if (!search.hasLexicalCriteria()) return [];
+    const { marketCode, limit } = search.scope;
     const query = this.products
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.assets', 'assets')
@@ -44,65 +30,76 @@ export class ProductLexicalRepository {
         'listing.marketCode = :marketCode AND listing.isActive = true',
         { marketCode },
       );
-    if (terms.length) {
-      const patterns = terms.map(
-        (term) => '% ' + normalizeSearchText(term) + '%',
-      );
-      const columns = [
-        'searchTitle',
-        'searchKeywords',
-        'searchDescription',
-        'searchMaterial',
-      ];
-      query
-        .where(
-          '(' +
-            columns
-              .map(
-                (column) =>
-                  'product.' + column + ' LIKE ANY(CAST(:patterns AS text[]))',
-              )
-              .join(' OR ') +
-            ')',
-          { patterns },
-        )
-        .addSelect(
-          `(SELECT COUNT(*) FROM unnest(CAST(:patterns AS text[])) AS term(pattern)
+    this.applyTextCriteria(query, search.criteria);
+    this.applyFilters(query, search.filters);
+    return query.addOrderBy('product.id', 'ASC').take(limit).getMany();
+  }
+
+  private applyTextCriteria(
+    query: SelectQueryBuilder<Product>,
+    criteria: SearchQuery['criteria'],
+  ): void {
+    const terms = [...new Set([...criteria.terms, ...criteria.productTerms])];
+    if (!terms.length) {
+      query.orderBy('product.createdAt', 'DESC');
+      return;
+    }
+    const patterns = searchTermPatterns(terms);
+    const columns = [
+      'searchTitle',
+      'searchKeywords',
+      'searchDescription',
+      'searchMaterial',
+    ];
+    query
+      .where(
+        '(' +
+          columns
+            .map(
+              (column) =>
+                'product.' + column + ' LIKE ANY(CAST(:patterns AS text[]))',
+            )
+            .join(' OR ') +
+          ')',
+        { patterns },
+      )
+      .addSelect(
+        `(SELECT COUNT(*) FROM unnest(CAST(:patterns AS text[])) AS term(pattern)
             WHERE ${columns.map((column) => `product.${column} LIKE term.pattern`).join(' OR ')})`,
-          'term_matches',
-        )
-        .addSelect(
-          'word_similarity(:query, product.searchTitle)',
-          'search_rank',
-        )
-        .setParameter('query', normalizeSearchText(intent.text))
-        .orderBy('term_matches', 'DESC')
-        .addOrderBy('search_rank', 'DESC');
-      if (intent.productTerms?.length) {
-        query.andWhere(
-          '(' +
-            columns
-              .map(
-                (column) =>
-                  `product.${column} LIKE ANY(CAST(:productPatterns AS text[]))`,
-              )
-              .join(' OR ') +
-            ')',
-          {
-            productPatterns: intent.productTerms.map(
-              (term) => '% ' + normalizeSearchText(term) + '%',
-            ),
-          },
-        );
-      }
-    } else query.orderBy('product.createdAt', 'DESC');
-    if (materialAliases.length) {
+        'term_matches',
+      )
+      .addSelect('word_similarity(:query, product.searchTitle)', 'search_rank')
+      .setParameter('query', normalizeSearchText(criteria.text))
+      .orderBy('term_matches', 'DESC')
+      .addOrderBy('search_rank', 'DESC');
+    if (criteria.productTerms.length) {
+      query.andWhere(
+        '(' +
+          columns
+            .map(
+              (column) =>
+                `product.${column} LIKE ANY(CAST(:productPatterns AS text[]))`,
+            )
+            .join(' OR ') +
+          ')',
+        {
+          productPatterns: searchTermPatterns(criteria.productTerms),
+        },
+      );
+    }
+  }
+
+  private applyFilters(
+    query: SelectQueryBuilder<Product>,
+    filters: SearchFilters,
+  ): void {
+    const { categoryCode, condition, materialAliases, price, measurements } =
+      filters;
+    if (materialAliases?.length) {
       query.andWhere(
         'product.searchMaterial LIKE ANY(CAST(:materialPatterns AS text[]))',
         {
-          materialPatterns: materialAliases.map(
-            (alias) => '% ' + normalizeSearchText(alias) + ' %',
-          ),
+          materialPatterns: searchPhrasePatterns(materialAliases),
         },
       );
     }
@@ -110,33 +107,20 @@ export class ProductLexicalRepository {
       query.andWhere('category.code = :categoryCode', { categoryCode });
     if (condition !== undefined)
       query.andWhere('product.condition = :condition', { condition });
-    if (intent.price) {
-      const { currencyCode, minimum, maximum } = intent.price;
-      query.andWhere('listing.currencyCode = :priceCurrency', {
-        priceCurrency: currencyCode,
-      });
-      if (minimum)
-        query.andWhere(
-          'listing.price ' + (minimum.inclusive ? '>=' : '>') + ' :minimum',
-          { minimum: minimum.amount.toFixed(2) },
-        );
-      if (maximum)
-        query.andWhere(
-          'listing.price ' + (maximum.inclusive ? '<=' : '<') + ' :maximum',
-          { maximum: maximum.amount.toFixed(2) },
-        );
-    }
-    let measurementParameter = 0;
-    for (const filter of productMeasurementFiltersSql(
-      'product',
-      intent.measurements ?? [],
-      (value) => {
-        const key = `measurement${measurementParameter++}`;
-        query.setParameter(key, value);
-        return `:${key}`;
-      },
-    ))
-      query.andWhere(filter);
-    return query.addOrderBy('product.id', 'ASC').take(limit).getMany();
+    let parameterIndex = 0;
+    const bind = (value: unknown): string => {
+      const key = `filter${parameterIndex++}`;
+      query.setParameter(key, value);
+      return `:${key}`;
+    };
+    const constraints = [
+      ...productPriceFiltersSql(
+        price,
+        { currency: 'listing.currencyCode', amount: 'listing.price' },
+        bind,
+      ),
+      ...productMeasurementFiltersSql('product', measurements ?? [], bind),
+    ];
+    for (const constraint of constraints) query.andWhere(constraint);
   }
 }

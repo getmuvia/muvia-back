@@ -1,3 +1,4 @@
+import { SearchQuery } from '../search-query';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
@@ -222,14 +223,24 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       maximum: { amount: 2000, inclusive: false },
     };
     expect(
-      (await lexical.search(intent(['escritorio'], { price }), 1, 'BO')).map(
-        (product) => product.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio'], { price }),
+            scope: { limit: 1, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
     ).toEqual([below]);
     expect(
-      (await lexical.search(intent([], { price }), 5, 'BO')).map(
-        (product) => product.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { price }),
+            scope: { limit: 5, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
     ).toEqual([below]);
 
     const vector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
@@ -244,15 +255,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     } as unknown as ConfigService);
     expect(
       (
-        await vectors.findBySimilarity(
-          vector,
-          1,
-          0.3,
-          'BO',
-          undefined,
-          undefined,
-          price,
-        )
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 1, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { price: price },
+        })
       ).map((product) => product.id),
     ).toEqual([below]);
     const inclusive = {
@@ -261,15 +269,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     };
     expect(
       (
-        await vectors.findBySimilarity(
-          vector,
-          10,
-          0.3,
-          'BO',
-          undefined,
-          undefined,
-          inclusive,
-        )
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 10, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { price: inclusive },
+        })
       )
         .map((product) => product.id)
         .sort(),
@@ -300,37 +305,44 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     const measured = { dimension: ProductDimension.WIDTH, maxDimensionCm: 100 };
     expect(
       (
-        await vectors.findBySimilarity(
-          vector,
-          1,
-          0.3,
-          'BO',
-          [
-            {
-              dimension: measured.dimension,
-              maximum: { valueCm: measured.maxDimensionCm, inclusive: true },
-            },
-          ],
-          ProductCondition.USED,
-          inclusive,
-        )
-      ).map((product) => product.id),
-    ).toEqual([below]);
-    expect(
-      (
-        await lexical.search(
-          intent(['escritorio'], {
-            price: inclusive,
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 1, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: {
             measurements: [
               {
                 dimension: measured.dimension,
                 maximum: { valueCm: measured.maxDimensionCm, inclusive: true },
               },
             ],
+            condition: ProductCondition.USED,
+            price: inclusive,
+          },
+        })
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: {
+              ...intent(['escritorio'], {
+                price: inclusive,
+                measurements: [
+                  {
+                    dimension: measured.dimension,
+                    maximum: {
+                      valueCm: measured.maxDimensionCm,
+                      inclusive: true,
+                    },
+                  },
+                ],
+              }),
+              condition: ProductCondition.USED,
+            },
+            scope: { limit: 1, marketCode: 'BO' },
           }),
-          1,
-          'BO',
-          ProductCondition.USED,
         )
       ).map((product) => product.id),
     ).toEqual([below]);
@@ -355,16 +367,18 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       [category.id, [affordable, expensive]],
     );
     const response = await lexical.search(
-      intent(['escritorio'], {
-        price: {
-          currencyCode: 'BOB',
-          maximum: { amount: 1000, inclusive: true },
+      SearchQuery.fromIntent({
+        intent: {
+          ...intent(['escritorio'], {
+            price: {
+              currencyCode: 'BOB',
+              maximum: { amount: 1000, inclusive: true },
+            },
+          }),
+          categoryCode: category.code,
         },
+        scope: { limit: 10, marketCode: 'BO' },
       }),
-      10,
-      'BO',
-      undefined,
-      category.code,
     );
     expect(response.map((product) => product.id)).toEqual([affordable]);
   });
@@ -415,10 +429,22 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ).toEqual(new Set([used, wideUsed]));
     expect((await catalog.findAll({})).total).toBe(3);
     expect(
-      await lexical.search(intent(['silla']), 1, 'BO', ProductCondition.USED),
+      await lexical.search(
+        SearchQuery.fromIntent({
+          intent: { ...intent(['silla']), condition: ProductCondition.USED },
+          scope: { limit: 1, marketCode: 'BO' },
+        }),
+      ),
     ).toHaveLength(1);
     expect(
-      (await lexical.search(intent(['silla']), 5, 'BO', ProductCondition.USED))
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: { ...intent(['silla']), condition: ProductCondition.USED },
+            scope: { limit: 5, marketCode: 'BO' },
+          }),
+        )
+      )
         .map((product) => product.id)
         .sort(),
     ).toEqual([used, wideUsed].sort());
@@ -444,29 +470,28 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     const vectorRepository = new ProductVectorRepository(products, {
       getOrThrow: () => 'condition-test',
     } as unknown as ConfigService);
-    const limited = await vectorRepository.findBySimilarity(
-      queryVector,
-      1,
-      0.1,
-      'BO',
-      undefined,
-      ProductCondition.USED,
-    );
+    const limited = await vectorRepository.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.1,
+      filters: { condition: ProductCondition.USED },
+    });
     expect(limited).toHaveLength(1);
     expect([used, wideUsed]).toContain(limited[0].id);
-    const measured = await vectorRepository.findBySimilarity(
-      queryVector,
-      5,
-      0.1,
-      'BO',
-      [
-        {
-          dimension: ProductDimension.WIDTH,
-          maximum: { valueCm: 70, inclusive: true },
-        },
-      ],
-      ProductCondition.USED,
-    );
+    const measured = await vectorRepository.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 5, marketCode: 'BO' },
+      threshold: 0.1,
+      filters: {
+        measurements: [
+          {
+            dimension: ProductDimension.WIDTH,
+            maximum: { valueCm: 70, inclusive: true },
+          },
+        ],
+        condition: ProductCondition.USED,
+      },
+    });
     expect(measured.map((product) => product.id)).toEqual([used]);
   });
 
@@ -538,9 +563,23 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       [id],
     );
     expect(
-      (await lexical.search(intent(['sillon']), 10, 'BO')).map((p) => p.id),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['sillon']),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([id]);
-    expect(await lexical.search(intent(['oficina']), 10, 'BO')).toEqual([]);
+    expect(
+      await lexical.search(
+        SearchQuery.fromIntent({
+          intent: intent(['oficina']),
+          scope: { limit: 10, marketCode: 'BO' },
+        }),
+      ),
+    ).toEqual([]);
     const rows = await db.query<SearchColumns>(
       'SELECT search_description, search_keywords, search_material FROM products WHERE id = $1',
       [id],
@@ -633,11 +672,21 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       `INSERT INTO product_assets (product_id, url) VALUES ($1, 'a.webp'), ($1, 'b.webp')`,
       [title],
     );
-    const prefix = await lexical.search(intent(['sil']), 10, 'BO');
+    const prefix = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent(['sil']),
+        scope: { limit: 10, marketCode: 'BO' },
+      }),
+    );
     expect(new Set(prefix.map((p) => p.id))).toEqual(
       new Set([title, keyword, description, plural]),
     );
-    const aliases = await lexical.search(intent(['silla']), 2, 'BO');
+    const aliases = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent(['silla']),
+        scope: { limit: 2, marketCode: 'BO' },
+      }),
+    );
     expect(aliases.map((p) => p.id)).toEqual([title, plural]);
     expect(aliases[0].assets).toHaveLength(2);
     expect(Number(aliases[0].listings[0].price)).toBe(400);
@@ -732,13 +781,23 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ];
     expect(
       (
-        await lexical.search(intent(['madera'], { measurements }), 10, 'BO')
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['madera'], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
       ).map((p) => p.id),
     ).toEqual([small]);
     expect(
-      (await lexical.search(intent([], { measurements }), 10, 'BO')).map(
-        (p) => p.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([small]);
   });
 
@@ -749,11 +808,26 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       keywords: ['azul', 'cómoda'],
     });
     const response = await lexical.search(
-      intent(['azul', 'cómoda'], { productTerms: ['silla', 'asiento'] }),
-      1,
-      'BO',
+      SearchQuery.fromIntent({
+        intent: intent(['azul', 'cómoda'], {
+          productTerms: ['silla', 'asiento'],
+        }),
+        scope: { limit: 1, marketCode: 'BO' },
+      }),
     );
     expect(response.map((product) => product.id)).toEqual([best]);
+  });
+
+  it('does not retrieve the entire market for semantic-only or empty criteria', async () => {
+    await seed('Silla');
+    await seed('Mesa');
+    for (const text of ['', 'un lugar cómodo para leer']) {
+      const search = SearchQuery.fromIntent({
+        scope: { marketCode: 'BO', limit: 10 },
+        intent: { text, terms: [] },
+      });
+      expect(await lexical.search(search)).toEqual([]);
+    }
   });
 
   it('uses material aliases before lexical and vector limits', async () => {
@@ -764,9 +838,14 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     });
     const material = { label: 'Wood', aliases: ['wood', 'madera'] };
     expect(
-      (await lexical.search(intent(['escritorio'], { material }), 1, 'BO')).map(
-        (product) => product.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio'], { material }),
+            scope: { limit: 1, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
     ).toEqual([wood]);
 
     const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
@@ -787,17 +866,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     const vectors = new ProductVectorRepository(products, {
       getOrThrow: () => 'material-test',
     } as unknown as ConfigService);
-    const response = await vectors.findBySimilarity(
-      queryVector,
-      1,
-      0.3,
-      'BO',
-      [],
-      undefined,
-      undefined,
-      undefined,
-      material.aliases,
-    );
+    const response = await vectors.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.3,
+      filters: { measurements: [], materialAliases: material.aliases },
+    });
     expect(response.map((product) => product.id)).toEqual([wood]);
   });
 
@@ -853,7 +927,14 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ];
     const expected = [valid, metric, inches].sort();
     expect(
-      (await lexical.search(intent([], { measurements }), 10, 'BO'))
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      )
         .map((product) => product.id)
         .sort(),
     ).toEqual(expected);
@@ -868,22 +949,29 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       getOrThrow: () => 'measurement-test',
     } as unknown as ConfigService);
     expect(
-      (await vectors.findBySimilarity(queryVector, 10, 0.3, 'BO', measurements))
+      (
+        await vectors.findBySimilarity({
+          embedding: queryVector,
+          scope: { limit: 10, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { measurements: measurements },
+        })
+      )
         .map((product) => product.id)
         .sort(),
     ).toEqual(expected);
     const [literal] = await lexical.search(
-      intent([], { measurements }),
-      1,
-      'BO',
+      SearchQuery.fromIntent({
+        intent: intent([], { measurements }),
+        scope: { limit: 1, marketCode: 'BO' },
+      }),
     );
-    const [semantic] = await vectors.findBySimilarity(
-      queryVector,
-      1,
-      0.3,
-      'BO',
-      measurements,
-    );
+    const [semantic] = await vectors.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.3,
+      filters: { measurements: measurements },
+    });
     expect(expected).toContain(literal.id);
     expect(expected).toContain(semantic.id);
   });
@@ -934,7 +1022,14 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ).toHaveLength(0);
     await migration.up(runner);
     expect(
-      (await lexical.search(intent(['escritorio']), 10, 'BO')).map((p) => p.id),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio']),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([id]);
   });
 });
