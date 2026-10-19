@@ -169,6 +169,7 @@ describe('SearchService hybrid retrieval', () => {
       keywords: [],
       categoryCode: 'TABLE',
       categoryId: 'category',
+      category: { id: 'category', code: 'TABLE', name: 'Tables' },
       specifications: null,
       price: 1000,
       currencyCode: 'BOB',

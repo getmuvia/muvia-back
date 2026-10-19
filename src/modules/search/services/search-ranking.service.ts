@@ -39,6 +39,7 @@ export class SearchRankingService {
           description: product.description,
           price: Number(product.price),
           currencyCode: product.currencyCode,
+          category: product.category,
           imageUrl: product.imageUrl,
           score: product.similarity,
           matchType: 'semantic',
@@ -78,6 +79,13 @@ export class SearchRankingService {
           price: Number(listing?.price ?? product.price),
           currencyCode:
             listing?.currencyCode ?? intent.price?.currencyCode ?? '',
+          category: product.category
+            ? {
+                id: product.category.id,
+                code: product.category.code,
+                name: product.category.name,
+              }
+            : null,
           imageUrl: asset?.url ?? null,
           score: 0,
           matchType: 'lexical',
