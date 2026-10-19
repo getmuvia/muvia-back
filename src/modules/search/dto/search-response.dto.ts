@@ -1,4 +1,4 @@
-import { ProductDimension } from '../../../common/search/product-measurement';
+import type { ProductMeasurementFilter } from '../../../common/search/product-measurement';
 import type { ProductPriceFilter } from '../../../common/search/product-price';
 import type {
   HybridProductResult,
@@ -17,10 +17,7 @@ export interface SearchInterpretationDto {
     code?: string;
     label: string;
   };
-  measurement?: {
-    dimension: ProductDimension;
-    maxDimensionCm: number;
-  };
+  measurements?: ProductMeasurementFilter[];
 }
 
 export interface HybridSearchResponseDto {

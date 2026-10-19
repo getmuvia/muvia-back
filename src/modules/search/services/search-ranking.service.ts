@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
   containsSearchPhrase,
+  matchesSearchTerm,
   normalizeSearchText,
 } from '../../../common/search/search-text';
 import { Product } from '../../products/entities/product.entity';
@@ -49,6 +50,7 @@ export class SearchRankingService {
             product.title,
             ...(product.keywords ?? []),
             product.description,
+            product.specifications?.material,
           ].join(' '),
         ),
         similarity: product.similarity,
@@ -59,7 +61,8 @@ export class SearchRankingService {
       const existing = candidates.get(product.id);
       if (existing) {
         existing.lexical = true;
-        existing.result.matchType = 'hybrid';
+        existing.result.matchType =
+          existing.similarity === undefined ? 'lexical' : 'hybrid';
         continue;
       }
       const listing = product.listings?.[0];
@@ -86,6 +89,7 @@ export class SearchRankingService {
             product.title,
             ...(product.keywords ?? []),
             product.description,
+            product.specifications?.material,
           ].join(' '),
         ),
         lexical: true,
@@ -96,9 +100,8 @@ export class SearchRankingService {
     const relatedResults: HybridProductResult[] = [];
     for (const candidate of candidates.values()) {
       const literalScore = intent.terms.length
-        ? intent.terms.filter((term) =>
-            containsSearchPhrase(candidate.text, term),
-          ).length / intent.terms.length
+        ? intent.terms.filter((term) => matchesSearchTerm(candidate.text, term))
+            .length / intent.terms.length
         : 1;
       const similarity = candidate.similarity;
       candidate.result.score =
@@ -118,8 +121,13 @@ export class SearchRankingService {
             alias,
           ),
         );
+      const matchesProduct =
+        !intent.productTerms?.length ||
+        intent.productTerms.some((term) =>
+          matchesSearchTerm(candidate.text, term),
+        );
       const relevant =
-        candidate.lexical ||
+        (candidate.lexical && matchesProduct) ||
         (similarity !== undefined &&
           similarity >= SEARCH.SEMANTIC_PRIMARY_THRESHOLD);
       if (sameCategory && sameMaterial && relevant)

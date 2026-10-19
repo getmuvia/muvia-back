@@ -3,13 +3,14 @@
 ## Flow
 
 POST /ai/hybrid reads the active market once (including its exchange rates),
-asks Gemini once for a structured interpretation, runs literal and vector
+resolves a structured Gemini interpretation, runs literal and vector
 retrieval in parallel, and merges their results.
 
-Gemini receives the complete original query, locale, market currency, supported
-currencies and cached catalog vocabulary. It returns cleanQuery, literal terms,
-a catalog category, material vocabulary, an optional maximum dimension in
-centimeters, monetary bounds and product condition. The backend validates all
+Gemini receives the complete original query, locale, market, currency, supported
+currencies, catalog vocabulary and selected category, condition and size filters.
+It returns cleanQuery, literal terms, equivalent product-type names, a catalog
+category, material vocabulary, dimension bounds in centimeters, monetary bounds
+and product condition. The backend validates all
 values and applies SQL constraints before retrieval limits. It never executes
 model-generated SQL.
 
@@ -19,10 +20,37 @@ Product text normalization remains necessary for database matching; stored
 product dimensions are converted with deterministic arithmetic in SQL.
 
 Selected category, condition and measurement controls take precedence over
-inferred values. Searching with a selected category uses the same hybrid route.
+inferred values; a selected size replaces only bounds for that dimension.
+Searching with a selected category uses the same hybrid route.
 Browsing without search text retains normal catalog pagination and explicit
 structured filters through GET /products. That endpoint no longer interprets
 natural-language numeric constraints.
+
+Product-type terms prevent generic attributes from admitting unrelated literal
+candidates. Literal candidates are ordered by term coverage, then title similarity.
+Material aliases constrain both retrieval paths before limits. An inferred
+category scopes the first retrieval; when too few primary matches remain, a second
+retrieval broadens inferred category/material preferences for related suggestions.
+Selected categories, conditions, prices and measurements remain mandatory.
+Both retrieval passes share the same query embedding.
+
+Measurements support up to three distinct dimensions, each with minimum/maximum
+and inclusive/exclusive bounds. Exact sizes use equal inclusive bounds. SQL
+compares all dimensions after converting stored cm/m/in units to centimeters.
+
+## Reusing AI calls
+
+Successful interpretations and query embeddings use bounded process-local caches
+(200 entries each, 60-second TTL after completion), sharing identical calls in
+flight. Failures are removed immediately. Interpretation keys include query,
+locale, market, supported currencies, selected filters and full catalog vocabulary.
+The model and prompt are fixed for each provider instance. Different result limits
+can reuse AI work while retrieving current products from the database.
+
+Rates and converted prices are never cached: conversion uses the market snapshot
+read for each search. Product result sets are not cached. No extra database table,
+cache service or dependency is required. Multiple backend instances keep separate
+caches; this optimization does not promise one AI call across all instances.
 
 ## Interpretation failure
 

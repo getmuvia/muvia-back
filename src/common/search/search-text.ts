@@ -22,6 +22,11 @@ export function containsSearchPhrase(text: string, phrase: string): boolean {
   return phrase.length > 0 && ` ${text} `.includes(` ${phrase} `);
 }
 
+/** Mirrors lexical retrieval's word-start prefix matching. */
+export function matchesSearchTerm(text: string, term: string): boolean {
+  return term.length > 0 && ` ${text}`.includes(` ${term}`);
+}
+
 /** PostgreSQL 16 equivalent. Pass only source-controlled SQL expressions here. */
 export function normalizedSearchSql(expression: string): string {
   const unaccented = `regexp_replace(lower(normalize(COALESCE(${expression}, ''), NFD)), U&'[\\0300-\\036f]', '', 'g')`;

@@ -16,13 +16,19 @@ const market = {
   code: 'BO',
   currencyCode: 'BOB',
   exchangeRates: { USD: { rate: 10, updatedAt: '2026-10-18' } },
-} as Market;
+} as unknown as Market;
 const candidate: SearchIntentCandidate = {
   cleanQuery: 'escritorio de madera',
   terms: ['escritorio', 'madera'],
+  productTerms: ['escritorio', 'desk'],
   categoryCode: 'DESK',
   material: { label: 'Madera', aliases: ['madera', 'wood'] },
-  measurement: { dimension: ProductDimension.WIDTH, maxDimensionCm: 180 },
+  measurements: [
+    {
+      dimension: ProductDimension.WIDTH,
+      maximum: { valueCm: 180, inclusive: true },
+    },
+  ],
   price: { currencyCode: 'USD', maximum: { amount: 500, inclusive: true } },
 };
 function setup(value: SearchIntentCandidate = candidate) {
@@ -53,14 +59,16 @@ describe('SearchIntentService', () => {
     expect(interpret).toHaveBeenCalledWith({
       query,
       locale: 'es-BO',
+      marketCode: 'BO',
       currencyCode: 'BOB',
       supportedCurrencies: ['BOB', 'USD'],
       categories,
+      selected: {},
     });
     expect(result.intent).toMatchObject({
       text: 'escritorio de madera',
       terms: ['escritorio', 'madera'],
-      measurement: candidate.measurement,
+      measurements: candidate.measurements,
       price: {
         currencyCode: 'BOB',
         maximum: { amount: 5000, inclusive: true },
@@ -147,7 +155,9 @@ describe('SearchIntentService', () => {
       terms: ['escritorio', 'madera'],
       categoryCode: 'DESK',
       condition: 'USED',
-      measurement: { dimension: 'width', maxDimensionCm: 100 },
+      measurements: [
+        { dimension: 'width', maximum: { valueCm: 100, inclusive: true } },
+      ],
     });
     expect(result.intent.price).toBeUndefined();
     expect(result.interpretation.source).toBe('deterministic');
@@ -161,5 +171,57 @@ describe('SearchIntentService', () => {
         .source,
     ).toBe('deterministic');
     expect(interpret).not.toHaveBeenCalled();
+  });
+
+  it('supplies selected context and overrides only the selected dimension', async () => {
+    const depth = {
+      dimension: ProductDimension.DEPTH,
+      maximum: { valueCm: 80, inclusive: false },
+    };
+    const { service, interpret } = setup({
+      ...candidate,
+      cleanQuery: 'Escritorio cómodo',
+      measurements: [...candidate.measurements!, depth],
+    });
+    const result = await service.resolve('cómodo', 'es-BO', market, {
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      dimension: ProductDimension.WIDTH,
+      maxDimensionCm: 100,
+    });
+    const selected = {
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      measurements: [
+        { dimension: 'width', maximum: { valueCm: 100, inclusive: true } },
+      ],
+    };
+    expect(interpret).toHaveBeenCalledWith(
+      expect.objectContaining({ selected }),
+    );
+    expect(result.intent).toMatchObject({
+      text: 'Escritorio cómodo',
+      condition: 'USED',
+      categoryCode: 'DESK',
+    });
+    expect(result.intent.measurements).toEqual([
+      depth,
+      ...selected.measurements,
+    ]);
+  });
+
+  it('converts a reused interpretation with current rates without mutating its original currency', async () => {
+    const { service } = setup();
+    const first = await service.resolve('escritorio', 'es-BO', market);
+    const second = await service.resolve('escritorio', 'es-BO', {
+      ...market,
+      exchangeRates: { USD: { rate: 12, updatedAt: 'later' } },
+    });
+    expect(first.intent.price?.maximum?.amount).toBe(5000);
+    expect(second.intent.price?.maximum?.amount).toBe(6000);
+    expect(candidate.price).toEqual({
+      currencyCode: 'USD',
+      maximum: { amount: 500, inclusive: true },
+    });
   });
 });

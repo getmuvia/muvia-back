@@ -6,6 +6,7 @@ import { SearchRankingService } from '../../services/search-ranking.service';
 const intent: SearchIntent = {
   text: 'armario melamina',
   terms: ['armario', 'melamina'],
+  productTerms: ['armario', 'guardarropa'],
   categoryCode: 'WARDROBE',
   material: { label: 'Melamina', aliases: ['melamina', 'tablero melaminico'] },
 };
@@ -55,5 +56,36 @@ describe('SearchRankingService', () => {
     const result = ranking.rank([product], [literal], intent);
     expect(result.results).toHaveLength(1);
     expect(result.results[0].matchType).toBe('hybrid');
+  });
+
+  it('does not promote an attribute-only literal match to primary results', () => {
+    const unrelated = {
+      ...product,
+      id: 'attribute-only',
+      title: 'Mesa de melamina',
+      description: '',
+      keywords: [],
+      category: { code: 'WARDROBE' },
+      assets: [],
+    } as unknown as Product;
+    const result = ranking.rank([], [unrelated], intent);
+    expect(result.results).toEqual([]);
+    expect(result.relatedResults.map((item) => item.id)).toEqual([
+      'attribute-only',
+    ]);
+  });
+
+  it('scores lexical prefixes consistently and keeps repeated lexical candidates lexical', () => {
+    const literal = {
+      ...product,
+      title: 'Armarios de melamina',
+      description: '',
+      keywords: [],
+      category: { code: 'WARDROBE' },
+      assets: [],
+    } as unknown as Product;
+    const result = ranking.rank([], [literal, literal], intent);
+    expect(result.results).toHaveLength(1);
+    expect(result.results[0]).toMatchObject({ score: 1, matchType: 'lexical' });
   });
 });

@@ -4,10 +4,10 @@ import type { ProductPriceFilter } from '../../../common/search/product-price';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
-  VALID_PRODUCT_DIMENSION_PATTERN,
   type ProductMeasurementFilter,
-  productDimensionCmSql,
+  productMeasurementFiltersSql,
 } from '../../../common/search/product-measurement';
+import { normalizeSearchText } from '../../../common/search/search-text';
 import { AI_ENV_KEYS } from '../../../config/ai.config';
 import { Product } from '../../products/entities/product.entity';
 import { ProductCondition } from '../../products/enums/product-condition.enum';
@@ -38,10 +38,11 @@ export class ProductVectorRepository {
     limit: number,
     threshold: number,
     marketCode = 'BO',
-    measurement?: ProductMeasurementFilter,
+    measurements: ProductMeasurementFilter[] = [],
     condition?: ProductCondition,
     price?: ProductPriceFilter,
     categoryCode?: string,
+    materialAliases: string[] = [],
   ): Promise<SearchProductResult[]> {
     const parameters: unknown[] = [
       embedding,
@@ -52,9 +53,10 @@ export class ProductVectorRepository {
     ];
     const filters: string[] = [];
     const bind = (value: unknown): string => `$${parameters.push(value)}`;
-    if (measurement)
+    filters.push(...productMeasurementFiltersSql('p', measurements, bind));
+    if (materialAliases.length)
       filters.push(
-        `${productDimensionCmSql('p', measurement.dimension, bind(VALID_PRODUCT_DIMENSION_PATTERN))} <= ${bind(measurement.maxDimensionCm)}`,
+        `p.search_material LIKE ANY(${bind(materialAliases.map((alias) => '% ' + normalizeSearchText(alias) + ' %'))}::text[])`,
       );
     if (condition !== undefined)
       filters.push(`p.condition = ${bind(condition)}`);

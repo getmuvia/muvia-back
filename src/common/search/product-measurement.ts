@@ -6,7 +6,13 @@ export enum ProductDimension {
 
 export interface ProductMeasurementFilter {
   dimension: ProductDimension;
-  maxDimensionCm: number;
+  minimum?: ProductMeasurementBound;
+  maximum?: ProductMeasurementBound;
+}
+
+export interface ProductMeasurementBound {
+  valueCm: number;
+  inclusive: boolean;
 }
 
 export const VALID_PRODUCT_DIMENSION_PATTERN = '^\\d+(\\.\\d+)?$';
@@ -24,4 +30,31 @@ export function productDimensionCmSql(
     WHEN 'm' THEN (${value})::numeric * 100
     WHEN 'in' THEN (${value})::numeric * 2.54
     ELSE NULL END ELSE NULL END)`;
+}
+
+/** Builds bound comparisons using repository-owned parameter binding. */
+export function productMeasurementFiltersSql(
+  productAlias: string,
+  measurements: readonly ProductMeasurementFilter[],
+  bind: (value: unknown) => string,
+): string[] {
+  return measurements.flatMap(({ dimension, minimum, maximum }) => {
+    const value = productDimensionCmSql(
+      productAlias,
+      dimension,
+      bind(VALID_PRODUCT_DIMENSION_PATTERN),
+    );
+    return [
+      ...(minimum
+        ? [
+            `${value} ${minimum.inclusive ? '>=' : '>'} ${bind(minimum.valueCm)}`,
+          ]
+        : []),
+      ...(maximum
+        ? [
+            `${value} ${maximum.inclusive ? '<=' : '<'} ${bind(maximum.valueCm)}`,
+          ]
+        : []),
+    ];
+  });
 }

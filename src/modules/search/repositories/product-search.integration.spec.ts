@@ -83,6 +83,9 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       keywords?: string[];
       material?: string;
       width?: number;
+      depth?: number;
+      height?: number;
+      unit?: string;
       active?: boolean;
       market?: string;
       price?: number;
@@ -101,7 +104,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
         extra.keywords ?? [],
         {
           material: extra.material,
-          dimensions: { width: extra.width ?? 100, unit: 'cm' },
+          dimensions: {
+            width: extra.width ?? 100,
+            depth: extra.depth ?? 60,
+            height: extra.height ?? 75,
+            unit: extra.unit ?? 'cm',
+          },
         },
       ],
     );
@@ -297,7 +305,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
           1,
           0.3,
           'BO',
-          measured,
+          [
+            {
+              dimension: measured.dimension,
+              maximum: { valueCm: measured.maxDimensionCm, inclusive: true },
+            },
+          ],
           ProductCondition.USED,
           inclusive,
         )
@@ -306,7 +319,15 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect(
       (
         await lexical.search(
-          intent(['escritorio'], { price: inclusive, measurement: measured }),
+          intent(['escritorio'], {
+            price: inclusive,
+            measurements: [
+              {
+                dimension: measured.dimension,
+                maximum: { valueCm: measured.maxDimensionCm, inclusive: true },
+              },
+            ],
+          }),
           1,
           'BO',
           ProductCondition.USED,
@@ -438,10 +459,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       5,
       0.1,
       'BO',
-      {
-        dimension: ProductDimension.WIDTH,
-        maxDimensionCm: 70,
-      },
+      [
+        {
+          dimension: ProductDimension.WIDTH,
+          maximum: { valueCm: 70, inclusive: true },
+        },
+      ],
       ProductCondition.USED,
     );
     expect(measured.map((product) => product.id)).toEqual([used]);
@@ -701,20 +724,168 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
        VALUES ('PE', 'Peru', 'PEN', 'es-PE', 'SOUTH_AMERICA', ARRAY['es-PE'], 'PE')`,
     );
     await seed('Mesa', { material: 'Madera', width: 80, market: 'PE' });
-    const measurement = {
-      dimension: ProductDimension.WIDTH,
-      maxDimensionCm: 90,
-    };
+    const measurements = [
+      {
+        dimension: ProductDimension.WIDTH,
+        maximum: { valueCm: 90, inclusive: true },
+      },
+    ];
     expect(
-      (await lexical.search(intent(['madera'], { measurement }), 10, 'BO')).map(
+      (
+        await lexical.search(intent(['madera'], { measurements }), 10, 'BO')
+      ).map((p) => p.id),
+    ).toEqual([small]);
+    expect(
+      (await lexical.search(intent([], { measurements }), 10, 'BO')).map(
         (p) => p.id,
       ),
     ).toEqual([small]);
+  });
+
+  it('requires a product term and ranks attribute coverage before the lexical limit', async () => {
+    await seed('Mesa azul cómoda');
+    await seed('Silla azul');
+    const best = await seed('Asiento de oficina', {
+      keywords: ['azul', 'cómoda'],
+    });
+    const response = await lexical.search(
+      intent(['azul', 'cómoda'], { productTerms: ['silla', 'asiento'] }),
+      1,
+      'BO',
+    );
+    expect(response.map((product) => product.id)).toEqual([best]);
+  });
+
+  it('uses material aliases before lexical and vector limits', async () => {
+    const metal = await seed('Escritorio', { material: 'Metal' });
+    const wood = await seed('Modelo de oficina', {
+      keywords: ['escritorio'],
+      material: 'MADERÁ',
+    });
+    const material = { label: 'Wood', aliases: ['wood', 'madera'] };
     expect(
-      (await lexical.search(intent([], { measurement }), 10, 'BO')).map(
-        (p) => p.id,
+      (await lexical.search(intent(['escritorio'], { material }), 1, 'BO')).map(
+        (product) => product.id,
       ),
-    ).toEqual([small]);
+    ).toEqual([wood]);
+
+    const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    const woodVector = JSON.stringify([
+      0.8,
+      0.2,
+      ...Array<number>(766).fill(0),
+    ]);
+    for (const [id, embedding] of [
+      [metal, queryVector],
+      [wood, woodVector],
+    ]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'material-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, embedding, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'material-test',
+    } as unknown as ConfigService);
+    const response = await vectors.findBySimilarity(
+      queryVector,
+      1,
+      0.3,
+      'BO',
+      [],
+      undefined,
+      undefined,
+      undefined,
+      material.aliases,
+    );
+    expect(response.map((product) => product.id)).toEqual([wood]);
+  });
+
+  it('applies all measurement bounds in centimeters before both retrieval limits', async () => {
+    const valid = await seed('Mesa cm', {
+      width: 160,
+      depth: 75,
+      height: 76.2,
+    });
+    const metric = await seed('Mesa m', {
+      width: 1.6,
+      depth: 0.75,
+      height: 0.762,
+      unit: 'm',
+    });
+    const inches = await seed('Mesa in', {
+      width: 60,
+      depth: 30,
+      height: 30,
+      unit: 'in',
+    });
+    const boundary = await seed('Mesa al límite', {
+      width: 180,
+      depth: 75,
+      height: 76.2,
+    });
+    const narrow = await seed('Mesa estrecha', {
+      width: 149,
+      depth: 75,
+      height: 76.2,
+    });
+    const deep = await seed('Mesa profunda', {
+      width: 160,
+      depth: 81,
+      height: 76.2,
+    });
+    const tall = await seed('Mesa alta', { width: 160, depth: 75, height: 77 });
+    const measurements = [
+      {
+        dimension: ProductDimension.WIDTH,
+        minimum: { valueCm: 150, inclusive: true },
+        maximum: { valueCm: 180, inclusive: false },
+      },
+      {
+        dimension: ProductDimension.DEPTH,
+        maximum: { valueCm: 80, inclusive: true },
+      },
+      {
+        dimension: ProductDimension.HEIGHT,
+        minimum: { valueCm: 76.2, inclusive: true },
+        maximum: { valueCm: 76.2, inclusive: true },
+      },
+    ];
+    const expected = [valid, metric, inches].sort();
+    expect(
+      (await lexical.search(intent([], { measurements }), 10, 'BO'))
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual(expected);
+    const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    for (const id of [...expected, boundary, narrow, deep, tall]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'measurement-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, queryVector, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'measurement-test',
+    } as unknown as ConfigService);
+    expect(
+      (await vectors.findBySimilarity(queryVector, 10, 0.3, 'BO', measurements))
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual(expected);
+    const [literal] = await lexical.search(
+      intent([], { measurements }),
+      1,
+      'BO',
+    );
+    const [semantic] = await vectors.findBySimilarity(
+      queryVector,
+      1,
+      0.3,
+      'BO',
+      measurements,
+    );
+    expect(expected).toContain(literal.id);
+    expect(expected).toContain(semantic.id);
   });
 
   it('uses GIN indexes for selective substring and word searches without disabling sequential scans', async () => {

@@ -60,18 +60,37 @@ export class SearchIntentService {
         ),
       );
     }
+    const selectedIntent: Pick<
+      SearchIntent,
+      'categoryCode' | 'condition' | 'measurements'
+    > = {
+      ...(selected.categoryCode ? { categoryCode: selected.categoryCode } : {}),
+      ...(selected.condition ? { condition: selected.condition } : {}),
+      ...(selected.dimension && selected.maxDimensionCm !== undefined
+        ? {
+            measurements: [
+              {
+                dimension: selected.dimension,
+                maximum: { valueCm: selected.maxDimensionCm, inclusive: true },
+              },
+            ],
+          }
+        : {}),
+    };
     let candidate: SearchIntentCandidate | undefined;
     if (this.provider.isAvailable()) {
       try {
         candidate = await this.provider.interpret({
           query,
           locale,
+          marketCode: market.code,
           currencyCode: market.currencyCode,
           supportedCurrencies: [
             market.currencyCode,
             ...Object.keys(market.exchangeRates ?? {}),
           ],
           categories,
+          selected: selectedIntent,
         });
       } catch {
         this.logger.warn(
@@ -80,10 +99,17 @@ export class SearchIntentService {
       }
     }
     const intent: SearchIntent = {
-      text: normalizeSearchText(candidate?.cleanQuery ?? query),
+      text: (candidate?.cleanQuery ?? query).trim(),
       terms: candidate
         ? [...new Set(candidate.terms.map(normalizeSearchText).filter(Boolean))]
         : searchTerms(query),
+      productTerms: candidate
+        ? [
+            ...new Set(
+              candidate.productTerms.map(normalizeSearchText).filter(Boolean),
+            ),
+          ]
+        : undefined,
       categoryCode: selected.categoryCode ?? candidate?.categoryCode,
       material: candidate?.material
         ? {
@@ -91,13 +117,12 @@ export class SearchIntentService {
             aliases: candidate.material.aliases.map(normalizeSearchText),
           }
         : undefined,
-      measurement:
-        selected.dimension && selected.maxDimensionCm !== undefined
-          ? {
-              dimension: selected.dimension,
-              maxDimensionCm: selected.maxDimensionCm,
-            }
-          : candidate?.measurement,
+      measurements: [
+        ...(candidate?.measurements ?? []).filter(
+          (measurement) => measurement.dimension !== selected.dimension,
+        ),
+        ...(selectedIntent.measurements ?? []),
+      ],
       condition: selected.condition ?? candidate?.condition,
       price: candidate?.price
         ? this.convertPrice(candidate.price, market)
@@ -117,7 +142,9 @@ export class SearchIntentService {
         ...(intent.material
           ? { material: { label: intent.material.label } }
           : {}),
-        ...(intent.measurement ? { measurement: intent.measurement } : {}),
+        ...(intent.measurements?.length
+          ? { measurements: intent.measurements }
+          : {}),
         ...(intent.price ? { price: intent.price } : {}),
       },
     };

@@ -6,9 +6,10 @@ import type { SearchInterpretationDto } from '../dto/search-response.dto';
 export interface SearchIntent {
   text: string;
   terms: string[];
+  productTerms?: string[];
   categoryCode?: string;
   material?: { label: string; aliases: string[] };
-  measurement?: ProductMeasurementFilter;
+  measurements?: ProductMeasurementFilter[];
   price?: ProductPriceFilter;
   condition?: ProductCondition;
 }

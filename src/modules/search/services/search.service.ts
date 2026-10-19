@@ -16,11 +16,14 @@ import { ProductVectorRepository } from '../repositories/product-vector.reposito
 import { SEARCH } from '../search.constants';
 import { SearchIntentService } from './search-intent.service';
 import { SearchRankingService } from './search-ranking.service';
+import { SearchQueryCache } from './search-query-cache';
 
 /** Orchestrates buyer catalog searches and keeps providers/repositories isolated. */
 @Injectable()
 export class SearchService {
   private readonly logger = new Logger(SearchService.name);
+  // The configured embedding provider/model is fixed for this service instance.
+  private readonly embeddings = new SearchQueryCache<string>();
 
   constructor(
     private readonly vectorService: VectorService,
@@ -49,7 +52,8 @@ export class SearchService {
     if (
       !intent.text &&
       !intent.terms.length &&
-      !intent.measurement &&
+      !intent.productTerms?.length &&
+      !intent.measurements?.length &&
       !intent.price &&
       !intent.categoryCode &&
       !intent.condition
@@ -64,31 +68,58 @@ export class SearchService {
     }
 
     const fetchLimit = limit * SEARCH.FETCH_MULTIPLIER;
-    const [semanticResults, lexicalResults] = await Promise.all([
-      intent.text
-        ? this.performSemanticSearch(
-            intent.text,
-            fetchLimit,
-            marketCode,
-            intent.measurement,
-            intent.condition,
-            intent.price,
-            intent.categoryCode,
-          )
-        : Promise.resolve([]),
-      this.productLexicalRepository.search(
-        intent,
-        fetchLimit,
-        marketCode,
-        intent.condition,
-        intent.categoryCode,
-      ),
-    ]);
-    const { results, relatedResults } = this.searchRankingService.rank(
+    const embedding =
+      intent.text && this.vectorService.isAvailable()
+        ? this.createQueryEmbedding(intent.text)
+        : undefined;
+    const retrieve = (categoryCode?: string, materialAliases: string[] = []) =>
+      Promise.all([
+        embedding
+          ? this.performSemanticSearch(
+              embedding,
+              fetchLimit,
+              marketCode,
+              intent.measurements,
+              intent.condition,
+              intent.price,
+              categoryCode,
+              materialAliases,
+            )
+          : Promise.resolve([]),
+        this.productLexicalRepository.search(
+          intent,
+          fetchLimit,
+          marketCode,
+          intent.condition,
+          categoryCode,
+          materialAliases,
+        ),
+      ]);
+    const [semanticResults, lexicalResults] = await retrieve(
+      intent.categoryCode,
+      intent.material?.aliases,
+    );
+    let ranked = this.searchRankingService.rank(
       semanticResults,
       lexicalResults,
       intent,
     );
+    if (
+      ranked.results.length < limit &&
+      ((!dto.categoryCode && intent.categoryCode) ||
+        intent.material?.aliases.length)
+    ) {
+      // Broaden inferred preferences only; buyer-selected and numeric filters remain mandatory.
+      const [broaderSemantic, broaderLexical] = await retrieve(
+        dto.categoryCode,
+      );
+      ranked = this.searchRankingService.rank(
+        [...semanticResults, ...broaderSemantic],
+        [...lexicalResults, ...broaderLexical],
+        intent,
+      );
+    }
+    const { results, relatedResults } = ranked;
     const selected = results.slice(0, limit);
     const suggestionLimit = Math.min(
       Math.max(limit - selected.length, 0),
@@ -113,13 +144,14 @@ export class SearchService {
   }
 
   private async performSemanticSearch(
-    query: string,
+    embedding: Promise<string>,
     limit: number,
     marketCode: string,
-    measurement?: ProductMeasurementFilter,
+    measurements: ProductMeasurementFilter[] = [],
     condition?: ProductCondition,
     price?: ProductPriceFilter,
     categoryCode?: string,
+    materialAliases: string[] = [],
   ): Promise<SearchProductResult[]> {
     if (!this.vectorService.isAvailable()) {
       this.logger.warn('VectorService unavailable, skipping semantic search');
@@ -127,16 +159,16 @@ export class SearchService {
     }
 
     try {
-      const embedding = await this.createQueryEmbedding(query);
       return await this.productVectorRepository.findBySimilarity(
-        embedding,
+        await embedding,
         limit,
         SEARCH.DEFAULT_SIMILARITY_THRESHOLD,
         marketCode,
-        measurement,
+        measurements,
         condition,
         price,
         categoryCode,
+        materialAliases,
       );
     } catch (error: unknown) {
       this.logger.error(`Semantic search failed: ${this.errorMessage(error)}`);
@@ -164,11 +196,13 @@ export class SearchService {
   }
 
   private async createQueryEmbedding(query: string): Promise<string> {
-    const vector = await this.vectorService.generateEmbedding(
-      query,
-      'RETRIEVAL_QUERY',
-    );
-    return this.vectorService.toVectorString(vector);
+    return this.embeddings.getOrCreate(query, async () => {
+      const vector = await this.vectorService.generateEmbedding(
+        query,
+        'RETRIEVAL_QUERY',
+      );
+      return this.vectorService.toVectorString(vector);
+    });
   }
 
   private ensureSemanticSearchAvailable(): void {

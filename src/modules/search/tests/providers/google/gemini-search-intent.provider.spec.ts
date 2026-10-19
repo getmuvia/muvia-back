@@ -18,15 +18,20 @@ jest.mock('@google/genai', () => {
 const input = {
   query: 'escritorio hasta 180 cm de ancho por menos de 500 dÃ³lares',
   locale: 'es-BO',
+  marketCode: 'BO',
   currencyCode: 'BOB',
   supportedCurrencies: ['BOB', 'USD'],
   categories: [{ code: 'DESK', label: 'Escritorio', aliases: ['desk'] }],
+  selected: {},
 };
 const candidate = {
   cleanQuery: 'escritorio',
   terms: ['escritorio'],
+  productTerms: ['escritorio', 'desk'],
   categoryCode: 'DESK',
-  measurement: { dimension: 'width', maxDimensionCm: 180 },
+  measurements: [
+    { dimension: 'width', maximum: { valueCm: 180, inclusive: true } },
+  ],
   price: { currencyCode: 'USD', maximum: { amount: 500, inclusive: false } },
 };
 function provider() {
@@ -65,6 +70,10 @@ describe('GeminiSearchIntentProvider', () => {
       'cleanQuery',
     );
     expect(request.config.responseSchema.properties).toHaveProperty('price');
+    expect(request.config.responseSchema.properties).toHaveProperty(
+      'categoryCode.enum',
+      ['DESK'],
+    );
     expect(request.config.systemInstruction).toContain(
       'Never convert currencies',
     );
@@ -74,7 +83,28 @@ describe('GeminiSearchIntentProvider', () => {
     { ...candidate, categoryCode: 'INVENTED' },
     { ...candidate, cleanQuery: 42 },
     { ...candidate, terms: 'escritorio' },
-    { ...candidate, measurement: { dimension: 'width', maxDimensionCm: -1 } },
+    {
+      ...candidate,
+      measurements: [
+        { dimension: 'width', maximum: { valueCm: -1, inclusive: true } },
+      ],
+    },
+    {
+      ...candidate,
+      measurements: [candidate.measurements[0], candidate.measurements[0]],
+    },
+    { ...candidate, measurements: [{ dimension: 'depth' }] },
+    {
+      ...candidate,
+      measurements: [
+        {
+          dimension: 'depth',
+          minimum: { valueCm: 80, inclusive: true },
+          maximum: { valueCm: 80, inclusive: false },
+        },
+      ],
+    },
+    { ...candidate, productTerms: ['a', 'b', 'c', 'd', 'e', 'f'] },
     {
       ...candidate,
       price: {
@@ -113,4 +143,60 @@ describe('GeminiSearchIntentProvider', () => {
       await expect(provider().interpret(input)).rejects.toThrow();
     },
   );
+
+  it('preserves multiple dimensions, strict ranges and exact measurements', async () => {
+    const measurements = [
+      {
+        dimension: 'width',
+        minimum: { valueCm: 150, inclusive: true },
+        maximum: { valueCm: 180, inclusive: false },
+      },
+      { dimension: 'depth', maximum: { valueCm: 80, inclusive: true } },
+      {
+        dimension: 'height',
+        minimum: { valueCm: 75, inclusive: true },
+        maximum: { valueCm: 75, inclusive: true },
+      },
+    ];
+    generateContent.mockResolvedValue({
+      text: JSON.stringify({ ...candidate, measurements }),
+    });
+    expect((await provider().interpret(input)).measurements).toEqual(
+      measurements,
+    );
+  });
+
+  it('shares interpretation calls in flight and reuses successful values', async () => {
+    const interpreter = provider();
+    await Promise.all([
+      interpreter.interpret(input),
+      interpreter.interpret(input),
+    ]);
+    await interpreter.interpret(input);
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('separates market, locale, selected context and catalog vocabulary in the cache', async () => {
+    const interpreter = provider();
+    await interpreter.interpret(input);
+    await interpreter.interpret({ ...input, locale: 'en-BO' });
+    await interpreter.interpret({ ...input, marketCode: 'PE' });
+    await interpreter.interpret({
+      ...input,
+      selected: { categoryCode: 'DESK' },
+    });
+    await interpreter.interpret({
+      ...input,
+      categories: [{ ...input.categories[0], aliases: ['escritorio', 'desk'] }],
+    });
+    expect(generateContent).toHaveBeenCalledTimes(5);
+  });
+
+  it('retries failed interpretations instead of caching fallback state', async () => {
+    const interpreter = provider();
+    generateContent.mockRejectedValueOnce(new Error('timeout'));
+    await expect(interpreter.interpret(input)).rejects.toThrow('timeout');
+    await expect(interpreter.interpret(input)).resolves.toEqual(candidate);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
 });
