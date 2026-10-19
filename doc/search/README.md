@@ -1,201 +1,98 @@
-# Search module
+# Catalog search
 
-`SearchModule` owns buyer catalog search. It keeps the existing public routes,
-adds a structured `interpretation` to hybrid responses, and isolates Gemini from
-the deterministic taxonomy, retrieval and ranking rules.
+## Flow
 
-## Structure
+POST /ai/hybrid reads the active market once (including its exchange rates),
+asks Gemini once for a structured interpretation, runs literal and vector
+retrieval in parallel, and merges their results.
 
-```text
-src/modules/search/
-├── dto/
-├── interfaces/
-├── providers/google/
-├── repositories/
-├── services/
-├── tests/
-├── search.constants.ts
-├── search.controller.ts
-└── search.module.ts
-```
+Gemini receives the complete original query, locale, market currency, supported
+currencies and cached catalog vocabulary. It returns cleanQuery, literal terms,
+a catalog category, material vocabulary, an optional maximum dimension in
+centimeters, monetary bounds and product condition. The backend validates all
+values and applies SQL constraints before retrieval limits. It never executes
+model-generated SQL.
 
-The module does not own an entity. A search is an operation over existing
-`Product` records, not a persisted CRUD resource.
+Natural-language extraction is centralized in Gemini. Category aliases stored
+in the catalog are vocabulary supplied to the model, not a second interpreter.
+Product text normalization remains necessary for database matching; stored
+product dimensions are converted with deterministic arithmetic in SQL.
 
-## Responsibilities
+Selected category, condition and measurement controls take precedence over
+inferred values. Searching with a selected category uses the same hybrid route.
+Browsing without search text retains normal catalog pagination and explicit
+structured filters through GET /products. That endpoint no longer interprets
+natural-language numeric constraints.
 
-- `SearchController` owns HTTP transport and delegates to `SearchService`.
-- `SearchService` orchestrates market validation, intent resolution, parallel
-  lexical/vector retrieval and result selection.
-- `SearchIntentService` combines deterministic taxonomy rules with the optional
-  AI candidate, validates inferred category and measurement data, preserves new
-  material vocabulary and builds the user-facing interpretation.
-- `SearchRankingService` evaluates product identity, material relevance and
-  semantic evidence without calling external services.
-- `GeminiSearchIntentProvider` is the adapter behind
-  `SEARCH_INTENT_PROVIDER`. It uses structured JSON output, minimal thinking and
-  a short request timeout.
-- `ProductLexicalRepository` and `ProductVectorRepository` contain search-only
-  database access.
+## Interpretation failure
 
-Product embedding persistence remains in `AiModule` through
-`ProductEmbeddingRepository`; the search module only reads compatible vectors.
+When Gemini is disabled, unavailable, times out or returns invalid values, the
+request continues with normalized literal terms and the available retrieval
+methods. If embedding generation also fails, literal retrieval remains active.
+The response uses interpretation.source = deterministic.
 
-## Request flow
+The catalog and search modal show only the localized short-search hint:
+"Prueba buscando por nombre o categorÃ­a con hasta 3 palabras, por ejemplo:
+Â«silla de maderaÂ»."
 
-```text
-POST /ai/hybrid
-    -> SearchController
-    -> SearchService
-       -> SearchIntentService
-          -> CategoryTaxonomyService
-          -> GeminiSearchIntentProvider (optional)
-       -> ProductLexicalRepository + ProductVectorRepository
-       -> SearchRankingService
-    -> response with interpretation, results and relatedResults
-```
+The original query remains editable. Three words is guidance, not an input
+limit. Normal interpretation responses use source = ai. Related suggestions
+obey the same SQL price, dimension, selected-category and condition constraints.
 
-AI does not replace deterministic behavior. Explicit taxonomy and measurement
-parsing has priority. Gemini can fill missing intent fields. Categories use the
-stored Muvia taxonomy when they resolve; material expressions that do not belong
-to a known family are preserved instead of discarded, so lexical and semantic
-retrieval can still use them. If the model is disabled, unconfigured, times out
-or returns invalid JSON, the request continues with the deterministic intent.
+## Currency conversion
 
-## Semantic retrieval
+Each market declares its product currency and an exchangeRates object. A key
+identifies the source currency; its rate is local-currency units per one unit
+of that source currency. Each quote also stores updatedAt.
 
-Product embeddings are built from title, category name/code, structured
-specifications, keywords and description. This prevents semantic recall from
-depending on a seller repeating material or category information in free-form
-copy.
+- A price without an explicit currency uses the selected market currency.
+- Gemini preserves an explicitly named foreign currency and never supplies a rate.
+- Supported foreign bounds are converted using the market's stored rate.
+- Unsupported currencies return SEARCH_PRICE_CURRENCY_MISMATCH, with localized
+  guidance to enter the amount in the country's local currency.
+- Conversion uses integer arithmetic and directional cent rounding so strict
+  and inclusive bounds retain their meaning for stored two-decimal prices.
+- Prices displayed on products retain the listing's currency.
 
-The hybrid ranker treats retrieval methods as complementary:
+Rates are returned by the existing market query; conversion adds no database
+lookup per search and makes no web-search or exchange-provider request.
 
-- lexical evidence remains strongest for exact names, brands and model terms;
-- a semantic-only candidate with similarity `>= 0.45` can be a main result even
-  when regional wording does not occur literally in the product;
-- lower semantic candidates remain separate related suggestions;
-- known structured category and material constraints are still enforced;
-- an unknown AI material is evidence for retrieval, not a hard exclusion rule.
+## Administration and migration
 
-Pure semantic candidates retain their cosine similarity as their score. Only
-candidates found by both retrieval paths blend lexical relevance and semantic
-similarity.
+Apply migration AddMarketExchangeRates1792281600000 before deploying the backend.
+It adds the market exchange_rates JSONB field and seeds Bolivia's USD reference
+at 11.69 BOB per USD, from the BCB publication checked on 2026-10-18. This is an
+initial manually maintained reference, not an automatically refreshed quotation:
+https://www.bcb.gob.bo/
 
-### Embedding content versions
+PATCH /markets/:code/exchange-rates requires a valid JWT and the ADMIN role.
 
-`products.embedding_content_version` identifies which product document format
-produced a vector. Version 2 includes category and specifications. Existing
-vectors remain available during deployment, but the regeneration endpoint
-selects older or unversioned rows for refresh:
+Example request body:
 
-```text
-POST /ai/embeddings/regenerate
-```
+    { "currencyCode": "USD", "rate": 11.69 }
 
-This catalog-wide maintenance endpoint requires an authenticated admin account.
+The source currency must be an ISO 4217 code, and the rate must be positive,
+at most 1000000, and have at most six decimal places. The local currency always
+has an implicit rate of one. The update changes only the requested JSON key,
+preserving other currencies during concurrent edits.
 
-Run the database migration before calling the endpoint. Product updates also
-regenerate the vector when title, description, keywords, category or
-specifications change.
+A new currency is added through this endpoint, without changing the schema or
+interpreter instructions. Another country uses its own market currency and
+quotes. A future rate provider can update the same configuration independently
+of search. Existing product embeddings do not require regeneration.
 
-## API
+## Configuration and validation
 
-### Hybrid search
+GCP_SEARCH_INTENT_LOCATION and GCP_SEARCH_INTENT_MODEL select the interpreter.
+SEARCH_INTENT_AI_ENABLED controls interpretation independently of embeddings.
+SEARCH_INTENT_TIMEOUT_MS bounds the request timeout. The provider requests JSON
+output with minimal thinking and does not enable Google Search.
 
-`POST /ai/hybrid`
+POST /ai/search keeps its existing batch semantic-search contract. Public search
+routes retain their existing throttling and no-store response policy.
 
-```json
-{
-  "query": "quiero un escritorio de madera de 100 cm",
-  "limit": 10,
-  "marketCode": "BO",
-  "locale": "es-BO"
-}
-```
-
-The existing response fields remain compatible. `interpretation` is additive:
-
-```json
-{
-  "query": "quiero un escritorio de madera de 100 cm",
-  "interpretation": {
-    "summary": "Escritorio · Madera · Máximo 100 cm de ancho",
-    "source": "ai",
-    "category": {
-      "code": "DESK",
-      "label": "Escritorio"
-    },
-    "material": {
-      "code": "WOOD",
-      "label": "Madera"
-    },
-    "measurement": {
-      "dimension": "width",
-      "maxDimensionCm": 100
-    }
-  },
-  "results": [],
-  "count": 0,
-  "relatedResults": []
-}
-```
-
-`source` reports whether Gemini produced a valid candidate or the deterministic
-fallback was used. The visible summary is always constructed by Muvia from the
-validated intent; it is not free-form model output.
-
-The current measurement contract is a maximum dimension because the catalog SQL
-filter uses `<= maxDimensionCm`. The summary says `Máximo` so the buyer sees the
-constraint that was actually applied.
-
-### Batch semantic search
-
-`POST /ai/search` remains available with its previous request and response
-contract. Both public search routes have a per-instance limit of 60 requests per
-minute and return `Cache-Control: no-store`.
-
-## Configuration
-
-```env
-GCP_SEARCH_INTENT_LOCATION=global
-GCP_SEARCH_INTENT_MODEL=gemini-3.1-flash-lite
-SEARCH_INTENT_AI_ENABLED=true
-SEARCH_INTENT_TIMEOUT_MS=2500
-```
-
-- The intent model is separate from vision, image generation and embeddings.
-- `SEARCH_INTENT_AI_ENABLED=false` disables only model interpretation.
-- Missing `GCP_PROJECT_ID` also makes the provider unavailable without disabling
-  deterministic search.
-- The timeout accepts 500–10000 milliseconds.
-- Production model and location values are supplied by `muvia-infra`.
-
-The provider never logs the raw buyer query. It records only model and latency at
-debug level. No search intent or conversation is persisted by this module.
-
-## Tests
-
-Unit tests live under `src/modules/search/tests/` and mirror production folders.
-The focused suite covers:
-
-- AI enrichment and deterministic fallback;
-- preservation of previously unknown material vocabulary;
-- preservation of hybrid material ranking;
-- primary and related semantic-only regional matches;
-- category and specifications in the product embedding document;
-- the Gemini structured-output request contract;
-- vector model, content version and measurement filtering.
-
-Broader integration and end-to-end coverage can be added without changing the
-module API.
-
-## Extension points
-
-- Swap the intent model by changing the provider registered for
-  `SEARCH_INTENT_PROVIDER`.
-- Add contextual refinements inside `SearchIntentService`; controllers and
-  repositories do not need to know which provider resolved the context.
-- Extend the response DTO when the buyer UI supports direct structured edits.
-- Add another retrieval strategy behind `SearchService` without exposing it to
-  the HTTP layer.
+Unit tests cover structured-output validation, the single-call contract,
+currency conversion and rounding, interpretation/embedding failure and ranking.
+PostgreSQL/pgvector integration tests exercise migrations, persisted rate
+updates, literal matching and SQL constraints before result limits. Admin tests
+verify authentication, role restrictions and rate validation.

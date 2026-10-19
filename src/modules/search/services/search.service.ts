@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { ProductMeasurementFilter } from '../../../common/search/product-measurement';
+import type { ProductPriceFilter } from '../../../common/search/product-price';
 import { VectorService } from '../../ai/services/vector/vector.service';
 import { MarketsService } from '../../markets/markets.service';
 import { ProductCondition } from '../../products/enums/product-condition.enum';
@@ -36,15 +37,23 @@ export class SearchService {
       limit = SEARCH.DEFAULT_LIMIT,
       marketCode = 'BO',
       locale = 'es-BO',
-      condition,
     } = dto;
-    await this.marketsService.requireActive(marketCode);
+    const market = await this.marketsService.requireActive(marketCode);
     const { intent, interpretation } = await this.searchIntentService.resolve(
       query,
       locale,
+      market,
+      dto,
     );
 
-    if (!intent.terms.length && !intent.aliases.length && !intent.measurement) {
+    if (
+      !intent.text &&
+      !intent.terms.length &&
+      !intent.measurement &&
+      !intent.price &&
+      !intent.categoryCode &&
+      !intent.condition
+    ) {
       return {
         query,
         interpretation,
@@ -62,14 +71,17 @@ export class SearchService {
             fetchLimit,
             marketCode,
             intent.measurement,
-            condition,
+            intent.condition,
+            intent.price,
+            intent.categoryCode,
           )
         : Promise.resolve([]),
       this.productLexicalRepository.search(
         intent,
         fetchLimit,
         marketCode,
-        condition,
+        intent.condition,
+        intent.categoryCode,
       ),
     ]);
     const { results, relatedResults } = this.searchRankingService.rank(
@@ -106,6 +118,8 @@ export class SearchService {
     marketCode: string,
     measurement?: ProductMeasurementFilter,
     condition?: ProductCondition,
+    price?: ProductPriceFilter,
+    categoryCode?: string,
   ): Promise<SearchProductResult[]> {
     if (!this.vectorService.isAvailable()) {
       this.logger.warn('VectorService unavailable, skipping semantic search');
@@ -121,6 +135,8 @@ export class SearchService {
         marketCode,
         measurement,
         condition,
+        price,
+        categoryCode,
       );
     } catch (error: unknown) {
       this.logger.error(`Semantic search failed: ${this.errorMessage(error)}`);

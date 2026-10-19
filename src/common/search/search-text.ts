@@ -1,15 +1,21 @@
-import { getSearchLocale } from './locales';
-
 /** Shared normalization for catalog queries and relevance scoring. */
 export function normalizeSearchText(value: string): string {
-  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
 }
 
-export function searchTerms(value: string, locale = 'es-BO'): string[] {
-  const { stopWords } = getSearchLocale(locale);
-  return [...new Set(normalizeSearchText(value).split(' '))]
-    .filter(word => word.length >= 2 && !stopWords.has(word));
+export function searchTerms(value: string): string[] {
+  return [
+    ...new Set(
+      normalizeSearchText(value)
+        .split(' ')
+        .filter((word) => word.length >= 2),
+    ),
+  ];
 }
 
 export function containsSearchPhrase(text: string, phrase: string): boolean {

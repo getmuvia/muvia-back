@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import type { ProductPriceFilter } from '../../../common/search/product-price';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -39,6 +40,8 @@ export class ProductVectorRepository {
     marketCode = 'BO',
     measurement?: ProductMeasurementFilter,
     condition?: ProductCondition,
+    price?: ProductPriceFilter,
+    categoryCode?: string,
   ): Promise<SearchProductResult[]> {
     const parameters: unknown[] = [
       embedding,
@@ -47,16 +50,29 @@ export class ProductVectorRepository {
       limit,
       this.embeddingModel,
     ];
-    if (measurement) {
-      parameters.push(
-        VALID_PRODUCT_DIMENSION_PATTERN,
-        measurement.maxDimensionCm,
+    const filters: string[] = [];
+    const bind = (value: unknown): string => `$${parameters.push(value)}`;
+    if (measurement)
+      filters.push(
+        `${productDimensionCmSql('p', measurement.dimension, bind(VALID_PRODUCT_DIMENSION_PATTERN))} <= ${bind(measurement.maxDimensionCm)}`,
       );
+    if (condition !== undefined)
+      filters.push(`p.condition = ${bind(condition)}`);
+    if (categoryCode) filters.push(`category.code = ${bind(categoryCode)}`);
+    if (price) {
+      filters.push(`listing.currency_code = ${bind(price.currencyCode)}`);
+      if (price.minimum)
+        filters.push(
+          `listing.price ${price.minimum.inclusive ? '>=' : '>'} ${bind(price.minimum.amount.toFixed(2))}`,
+        );
+      if (price.maximum)
+        filters.push(
+          `listing.price ${price.maximum.inclusive ? '<=' : '<'} ${bind(price.maximum.amount.toFixed(2))}`,
+        );
     }
-    if (condition !== undefined) parameters.push(condition);
 
     const raw = await this.repository.query<RawSearchProductResult[]>(
-      this.getSimilarityQuery(measurement, condition),
+      this.getSimilarityQuery(filters),
       parameters,
     );
 
@@ -66,18 +82,7 @@ export class ProductVectorRepository {
     }));
   }
 
-  private getSimilarityQuery(
-    measurement?: ProductMeasurementFilter,
-    condition?: ProductCondition,
-  ): string {
-    const dimensionFilter = measurement
-      ? `AND ${productDimensionCmSql('p', measurement.dimension, '$6')} <= $7`
-      : '';
-    const conditionFilter =
-      condition !== undefined
-        ? `AND p.condition = $${measurement ? 8 : 6}`
-        : '';
-
+  private getSimilarityQuery(filters: readonly string[]): string {
     return `
       SELECT
         p.id,
@@ -108,8 +113,7 @@ export class ProductVectorRepository {
         AND p.embedding_model = $5
         AND p.embedding_revision = p.search_revision
         AND p.embedding_content_version = ${PRODUCT_EMBEDDING_CONTENT_VERSION}
-        ${dimensionFilter}
-        ${conditionFilter}
+        ${filters.map((filter) => `AND ${filter}`).join('\n        ')}
       ORDER BY p.embedding <=> $1::vector ASC
       LIMIT $4
     `;

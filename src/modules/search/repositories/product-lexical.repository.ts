@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { normalizeSearchText } from '../../../common/search/search-text';
 import {
   VALID_PRODUCT_DIMENSION_PATTERN,
   productDimensionCmSql,
@@ -9,12 +10,10 @@ import { Product } from '../../products/entities/product.entity';
 import { ProductCondition } from '../../products/enums/product-condition.enum';
 import type { SearchIntent } from '../interfaces/search-intent.interface';
 
-/** Encapsulates normalized text retrieval for catalog search. */
 @Injectable()
 export class ProductLexicalRepository {
   constructor(
-    @InjectRepository(Product)
-    private readonly productRepository: Repository<Product>,
+    @InjectRepository(Product) private readonly products: Repository<Product>,
   ) {}
 
   async search(
@@ -22,37 +21,18 @@ export class ProductLexicalRepository {
     limit: number,
     marketCode: string,
     condition?: ProductCondition,
+    categoryCode?: string,
   ): Promise<Product[]> {
-    const terms = [...new Set([...intent.terms, ...intent.aliases])];
-    if (!terms.length && !intent.measurement) return [];
-
-    const title = 'product.searchTitle';
-    const keywords = 'product.searchKeywords';
-    const description = 'product.searchDescription';
-    const material = 'product.searchMaterial';
-    const parameters = Object.fromEntries(
-      terms.map((term, index) => [
-        `term${index}`,
-        !intent.categoryCode && terms.length === 1 && term.length >= 3
-          ? `% ${term}%`
-          : `% ${term} %`,
-      ]),
-    );
-    const conditions = terms.map(
-      (_, index) =>
-        `(${title} LIKE :term${index} OR ${keywords} LIKE :term${index} OR ${description} LIKE :term${index} OR ${material} LIKE :term${index})`,
-    );
-    const rank = terms
-      .map((term, index) => {
-        const typeWeight = intent.aliases.includes(term) ? 10 : 1;
-        return `(CASE WHEN ${title} LIKE :term${index} THEN ${typeWeight * 3} ELSE 0 END
-        + CASE WHEN ${keywords} LIKE :term${index} THEN ${typeWeight * 2} ELSE 0 END
-        + CASE WHEN ${description} LIKE :term${index} THEN 1 ELSE 0 END
-        + CASE WHEN ${material} LIKE :term${index} THEN 2 ELSE 0 END)`;
-      })
-      .join(' + ');
-
-    const queryBuilder = this.productRepository
+    if (
+      !intent.terms.length &&
+      !intent.measurement &&
+      !intent.price &&
+      !intent.categoryCode &&
+      !condition &&
+      !categoryCode
+    )
+      return [];
+    const query = this.products
       .createQueryBuilder('product')
       .leftJoinAndSelect('product.assets', 'assets')
       .leftJoinAndSelect('product.category', 'category')
@@ -61,48 +41,69 @@ export class ProductLexicalRepository {
         'listing',
         'listing.marketCode = :marketCode AND listing.isActive = true',
         { marketCode },
-      )
-      .where(
-        conditions.length ? `(${conditions.join(' OR ')})` : '1 = 1',
-        parameters,
       );
-
-    if (condition !== undefined) {
-      queryBuilder.andWhere('product.condition = :condition', { condition });
+    if (intent.terms.length) {
+      const patterns = intent.terms.map(
+        (term) => '% ' + normalizeSearchText(term) + '%',
+      );
+      const columns = [
+        'searchTitle',
+        'searchKeywords',
+        'searchDescription',
+        'searchMaterial',
+      ];
+      query
+        .where(
+          '(' +
+            columns
+              .map(
+                (column) =>
+                  'product.' + column + ' LIKE ANY(CAST(:patterns AS text[]))',
+              )
+              .join(' OR ') +
+            ')',
+          { patterns },
+        )
+        .addSelect(
+          'word_similarity(:query, product.searchTitle)',
+          'search_rank',
+        )
+        .setParameter('query', intent.text)
+        .orderBy('search_rank', 'DESC');
+    } else query.orderBy('product.createdAt', 'DESC');
+    if (categoryCode)
+      query.andWhere('category.code = :categoryCode', { categoryCode });
+    if (condition !== undefined)
+      query.andWhere('product.condition = :condition', { condition });
+    if (intent.price) {
+      const { currencyCode, minimum, maximum } = intent.price;
+      query.andWhere('listing.currencyCode = :priceCurrency', {
+        priceCurrency: currencyCode,
+      });
+      if (minimum)
+        query.andWhere(
+          'listing.price ' + (minimum.inclusive ? '>=' : '>') + ' :minimum',
+          { minimum: minimum.amount.toFixed(2) },
+        );
+      if (maximum)
+        query.andWhere(
+          'listing.price ' + (maximum.inclusive ? '<=' : '<') + ' :maximum',
+          { maximum: maximum.amount.toFixed(2) },
+        );
     }
-
     if (intent.measurement) {
-      queryBuilder.andWhere(
-        `${productDimensionCmSql('product', intent.measurement.dimension, ':validDimension')} <= :maxDimensionCm`,
+      query.andWhere(
+        productDimensionCmSql(
+          'product',
+          intent.measurement.dimension,
+          ':validDimension',
+        ) + ' <= :maximumCm',
         {
           validDimension: VALID_PRODUCT_DIMENSION_PATTERN,
-          maxDimensionCm: intent.measurement.maxDimensionCm,
+          maximumCm: intent.measurement.maxDimensionCm,
         },
       );
     }
-
-    if (terms.length) {
-      queryBuilder
-        .addSelect(`(${rank})`, 'search_rank')
-        .orderBy('search_rank', 'DESC')
-        .addOrderBy('product.createdAt', 'DESC');
-    } else {
-      queryBuilder.orderBy('product.createdAt', 'DESC');
-    }
-
-    return queryBuilder
-      .addOrderBy('product.id', 'ASC')
-      .take(limit)
-      .getMany()
-      .then((products) =>
-        products.map((product) => {
-          const listing = product.listings[0];
-          if (listing) {
-            product.price = Number(listing.price);
-            product.stock = listing.stock;
-          }
-          return product;
-        }),
-      );
+    return query.addOrderBy('product.id', 'ASC').take(limit).getMany();
   }
 }

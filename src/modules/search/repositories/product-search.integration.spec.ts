@@ -73,11 +73,6 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
   ): SearchIntent => ({
     text: terms.join(' '),
     terms,
-    aliases: [],
-    aliasCategoryCodes: {},
-    relatedCategoryCodes: [],
-    articles: [],
-    identityPrefixes: [],
     ...extra,
   });
 
@@ -183,6 +178,24 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     if (db) await db.close();
   });
 
+  it('persists independent currency rates and preserves other keys when an admin updates one', async () => {
+    const markets = new MarketsService(source.getRepository(Market));
+    expect((await markets.requireActive('BO')).exchangeRates.USD.rate).toBe(
+      11.69,
+    );
+    await markets.updateExchangeRate('BO', { currencyCode: 'EUR', rate: 12 });
+    await markets.updateExchangeRate('BO', { currencyCode: 'USD', rate: 10 });
+    const refreshed = await markets.requireActive('BO');
+    expect(refreshed.exchangeRates.USD.rate).toBe(10);
+    expect(refreshed.exchangeRates.EUR.rate).toBe(12);
+    await expect(
+      markets.updateExchangeRate('BO', { currencyCode: 'BOB', rate: 2 }),
+    ).rejects.toThrow();
+    await expect(
+      markets.updateExchangeRate('ZZ', { currencyCode: 'USD', rate: 2 }),
+    ).rejects.toThrow();
+  });
+
   it('backfills existing products with accents, case and punctuation normalized', () => {
     expect(backfilled).toEqual({
       search_title: ' sillon nino ',
@@ -190,6 +203,149 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       search_keywords: ' ergonomico azul marino ',
       search_material: ' madera ',
     });
+  });
+
+  it('enforces listing budgets before lexical/vector limits and catalog pagination', async () => {
+    const below = await seed('Escritorio madera', { price: 1599.99 });
+    const boundary = await seed('Escritorio madera', { price: 2000 });
+    const above = await seed('Escritorio madera', { price: 3999 });
+    const price = {
+      currencyCode: 'BOB',
+      maximum: { amount: 2000, inclusive: false },
+    };
+    expect(
+      (await lexical.search(intent(['escritorio'], { price }), 1, 'BO')).map(
+        (product) => product.id,
+      ),
+    ).toEqual([below]);
+    expect(
+      (await lexical.search(intent([], { price }), 5, 'BO')).map(
+        (product) => product.id,
+      ),
+    ).toEqual([below]);
+
+    const vector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    for (const id of [above, boundary, below]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'price-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, vector, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'price-test',
+    } as unknown as ConfigService);
+    expect(
+      (
+        await vectors.findBySimilarity(
+          vector,
+          1,
+          0.3,
+          'BO',
+          undefined,
+          undefined,
+          price,
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    const inclusive = {
+      currencyCode: 'BOB',
+      maximum: { amount: 2000, inclusive: true },
+    };
+    expect(
+      (
+        await vectors.findBySimilarity(
+          vector,
+          10,
+          0.3,
+          'BO',
+          undefined,
+          undefined,
+          inclusive,
+        )
+      )
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual([below, boundary].sort());
+
+    const catalogPage = await catalog.findAll({
+      search: 'escritorio',
+      maxPrice: 1999.99,
+      limit: 1,
+    });
+    expect(catalogPage.data.map((product) => product.id)).toEqual([below]);
+    expect(catalogPage).toMatchObject({
+      total: 1,
+      totalPages: 1,
+    });
+    const range = { minPrice: 1000, maxPrice: 2000, limit: 1 };
+    const first = await catalog.findAll({ ...range, page: 1 });
+    const second = await catalog.findAll({ ...range, page: 2 });
+    expect(first).toMatchObject({ total: 2, totalPages: 2 });
+    expect(
+      new Set([...first.data, ...second.data].map((product) => product.id)),
+    ).toEqual(new Set([below, boundary]));
+
+    await db.query('UPDATE products SET condition = $2 WHERE id = $1', [
+      below,
+      ProductCondition.USED,
+    ]);
+    const measured = { dimension: ProductDimension.WIDTH, maxDimensionCm: 100 };
+    expect(
+      (
+        await vectors.findBySimilarity(
+          vector,
+          1,
+          0.3,
+          'BO',
+          measured,
+          ProductCondition.USED,
+          inclusive,
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    expect(
+      (
+        await lexical.search(
+          intent(['escritorio'], { price: inclusive, measurement: measured }),
+          1,
+          'BO',
+          ProductCondition.USED,
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    const combined = await catalog.findAll({
+      search: 'escritorio',
+      maxPrice: 2000,
+      ...measured,
+      condition: ProductCondition.USED,
+    });
+    expect(combined.data.map((product) => product.id)).toEqual([below]);
+  });
+
+  it('combines a selected category and a validated budget', async () => {
+    const category = await source
+      .getRepository(Category)
+      .save({ name: 'Budget desks', code: 'PRICE_DESK', isSelectable: true });
+    const affordable = await seed('Escritorio', { price: 799 });
+    const expensive = await seed('Escritorio', { price: 2000 });
+    await seed('Escritorio without the selected category', { price: 500 });
+    await db.query(
+      'UPDATE products SET category_id = $1 WHERE id = ANY($2::uuid[])',
+      [category.id, [affordable, expensive]],
+    );
+    const response = await lexical.search(
+      intent(['escritorio'], {
+        price: {
+          currencyCode: 'BOB',
+          maximum: { amount: 1000, inclusive: true },
+        },
+      }),
+      10,
+      'BO',
+      undefined,
+      category.code,
+    );
+    expect(response.map((product) => product.id)).toEqual([affordable]);
   });
 
   it('migrates existing products to NEW and enforces valid, non-null conditions', async () => {
@@ -442,7 +598,7 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect((await catalog.findAll({ search: '---' })).total).toBe(0);
   });
 
-  it('preserves lexical prefixes, complete words, weighted aliases and a stable limit with joined assets', async () => {
+  it('preserves lexical prefixes, relevance and a stable limit with joined assets', async () => {
     const title = await seed('Silla cómoda');
     const keyword = await seed('Asiento', { keywords: ['silla'] });
     const description = await seed('Asiento', {
@@ -458,14 +614,10 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect(new Set(prefix.map((p) => p.id))).toEqual(
       new Set([title, keyword, description, plural]),
     );
-    const aliases = await lexical.search(
-      intent(['oficina'], { aliases: ['silla'], categoryCode: 'chairs' }),
-      2,
-      'BO',
-    );
-    expect(aliases.map((p) => p.id)).toEqual([title, keyword]);
+    const aliases = await lexical.search(intent(['silla']), 2, 'BO');
+    expect(aliases.map((p) => p.id)).toEqual([title, plural]);
     expect(aliases[0].assets).toHaveLength(2);
-    expect(aliases[0].price).toBe(400);
+    expect(Number(aliases[0].listings[0].price)).toBe(400);
     expect(aliases[0].searchTitle).toBeUndefined();
   });
 

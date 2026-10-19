@@ -21,6 +21,13 @@ export class Market {
   @Column({ name: 'currency_code', type: 'char', length: 3 })
   currencyCode: string;
 
+  @Column({
+    name: 'exchange_rates',
+    type: 'jsonb',
+    default: () => "'{}'::jsonb",
+  })
+  exchangeRates: Record<string, { rate: number; updatedAt: string }>;
+
   @Column({ name: 'flag_emoji', length: 8 })
   flagEmoji: string;
 
