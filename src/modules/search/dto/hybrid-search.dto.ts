@@ -13,9 +13,30 @@ import {
 } from 'class-validator';
 import { SEARCH, SEARCH_VALIDATION } from '../search.constants';
 import { ProductCondition } from '../../products/enums/product-condition.enum';
+import { ProductDimension } from '../../../common/search/product-measurement';
 
 /** Request accepted by the buyer-facing hybrid catalog search. */
 export class HybridSearchDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  categoryCode?: string;
+
+  @ValidateIf(
+    (_dto: HybridSearchDto, value: unknown) =>
+      value !== undefined || _dto.maxDimensionCm !== undefined,
+  )
+  @IsEnum(ProductDimension)
+  dimension?: ProductDimension;
+
+  @ValidateIf(
+    (_dto: HybridSearchDto, value: unknown) =>
+      value !== undefined || _dto.dimension !== undefined,
+  )
+  @IsNumber()
+  @Min(1)
+  @Max(10_000)
+  maxDimensionCm?: number;
   @ValidateIf((_dto, value: unknown) => value !== undefined)
   @IsEnum(ProductCondition)
   condition?: ProductCondition;

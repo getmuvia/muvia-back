@@ -18,9 +18,18 @@ describe('ProductVectorRepository', () => {
       configService,
     );
 
-    await repository.findBySimilarity('[0.1,0.2]', 5, 0.3, 'BO', {
-      dimension: ProductDimension.WIDTH,
-      maxDimensionCm: 100,
+    await repository.findBySimilarity({
+      embedding: '[0.1,0.2]',
+      scope: { limit: 5, marketCode: 'BO' },
+      threshold: 0.3,
+      filters: {
+        measurements: [
+          {
+            dimension: ProductDimension.WIDTH,
+            maximum: { valueCm: 100, inclusive: true },
+          },
+        ],
+      },
     });
 
     const [query, parameters] = (typeOrmRepository.query as jest.Mock).mock

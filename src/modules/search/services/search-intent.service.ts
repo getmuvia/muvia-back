@@ -1,15 +1,28 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
-  resolveMaterialSearchIntent,
-  type MaterialSearchIntent,
-} from '../../../common/search/product-material';
-import { ProductDimension } from '../../../common/search/product-measurement';
+  BadRequestException,
+  Inject,
+  Injectable,
+  Logger,
+} from '@nestjs/common';
+import {
+  normalizeSearchText,
+  searchTerms,
+} from '../../../common/search/search-text';
+import type {
+  ProductPriceBound,
+  ProductPriceFilter,
+} from '../../../common/search/product-price';
+import {
+  createErrorPayload,
+  ERROR_CODES,
+} from '../../../common/errors/error-code';
 import { CategoryTaxonomyService } from '../../categories/category-taxonomy.service';
-import type { SearchInterpretationDto } from '../dto/search-response.dto';
+import type { Market } from '../../markets/entities/market.entity';
+import type { HybridSearchDto } from '../dto/hybrid-search.dto';
 import {
   SEARCH_INTENT_PROVIDER,
-  type SearchIntentCandidate,
   type SearchIntentProvider,
+  type SearchIntentCandidate,
 } from '../interfaces/search-intent-provider.interface';
 import type {
   ResolvedSearchIntent,
@@ -21,172 +34,163 @@ export class SearchIntentService {
   private readonly logger = new Logger(SearchIntentService.name);
 
   constructor(
-    private readonly categoryTaxonomyService: CategoryTaxonomyService,
+    private readonly taxonomy: CategoryTaxonomyService,
     @Inject(SEARCH_INTENT_PROVIDER)
-    private readonly intentProvider: SearchIntentProvider,
+    private readonly provider: SearchIntentProvider,
   ) {}
 
-  async resolve(query: string, locale: string): Promise<ResolvedSearchIntent> {
-    const deterministicIntent =
-      await this.categoryTaxonomyService.createSearchIntent(query, locale);
-    const candidate = await this.interpretWithFallback(query, locale);
-    const intent = candidate
-      ? await this.enrichIntent(deterministicIntent, candidate, locale)
-      : deterministicIntent;
-
-    return {
-      intent,
-      interpretation: this.buildInterpretation(
-        query,
-        intent,
-        candidate,
-        locale,
-      ),
-    };
-  }
-
-  private async interpretWithFallback(
+  async resolve(
     query: string,
     locale: string,
-  ): Promise<SearchIntentCandidate | undefined> {
-    if (!this.intentProvider.isAvailable()) return undefined;
-
-    try {
-      return await this.intentProvider.interpret({ query, locale });
-    } catch {
-      this.logger.warn('AI intent unavailable; deterministic fallback used');
-      return undefined;
+    market: Market,
+    selected: Pick<
+      HybridSearchDto,
+      'categoryCode' | 'dimension' | 'maxDimensionCm' | 'condition'
+    > = {},
+  ): Promise<ResolvedSearchIntent> {
+    const categories = await this.taxonomy.getSearchCategories(locale);
+    if (
+      selected.categoryCode &&
+      !categories.some((item) => item.code === selected.categoryCode)
+    ) {
+      throw new BadRequestException(
+        createErrorPayload(
+          ERROR_CODES.CATEGORY_NOT_SELECTABLE,
+          'The selected category is not available',
+        ),
+      );
     }
-  }
-
-  private async enrichIntent(
-    deterministic: SearchIntent,
-    candidate: SearchIntentCandidate,
-    locale: string,
-  ): Promise<SearchIntent> {
-    let intent = deterministic;
-
-    if (candidate.category) {
-      const categoryIntent =
-        await this.categoryTaxonomyService.createSearchIntent(
-          candidate.category,
+    const selectedIntent: Pick<
+      SearchIntent,
+      'categoryCode' | 'condition' | 'measurements'
+    > = {
+      ...(selected.categoryCode ? { categoryCode: selected.categoryCode } : {}),
+      ...(selected.condition ? { condition: selected.condition } : {}),
+      ...(selected.dimension && selected.maxDimensionCm !== undefined
+        ? {
+            measurements: [
+              {
+                dimension: selected.dimension,
+                maximum: { valueCm: selected.maxDimensionCm, inclusive: true },
+              },
+            ],
+          }
+        : {}),
+    };
+    let candidate: SearchIntentCandidate | undefined;
+    if (this.provider.isAvailable()) {
+      try {
+        candidate = await this.provider.interpret({
+          query,
           locale,
+          marketCode: market.code,
+          currencyCode: market.currencyCode,
+          supportedCurrencies: [
+            market.currencyCode,
+            ...Object.keys(market.exchangeRates ?? {}),
+          ],
+          categories,
+          selected: selectedIntent,
+        });
+      } catch {
+        this.logger.warn(
+          'Search interpretation unavailable; continuing with keyword retrieval',
         );
-      if (!intent.categoryCode && categoryIntent.categoryCode) {
-        intent = {
-          ...intent,
-          categoryCode: categoryIntent.categoryCode,
-          categoryLabel: categoryIntent.categoryLabel,
-          aliases: categoryIntent.aliases,
-          relatedCategoryCodes: categoryIntent.relatedCategoryCodes,
-        };
       }
     }
-
-    const inferredMaterial = candidate.material
-      ? resolveMaterialSearchIntent(candidate.material)
-      : undefined;
-
-    return {
-      ...intent,
-      material: intent.material ?? inferredMaterial,
-      measurement: intent.measurement ?? candidate.measurement,
-    };
-  }
-
-  private buildInterpretation(
-    query: string,
-    intent: SearchIntent,
-    candidate: SearchIntentCandidate | undefined,
-    locale: string,
-  ): SearchInterpretationDto {
-    const categoryLabel = this.categoryLabel(intent);
-    const materialLabel = this.materialLabel(intent.material, candidate);
-    const measurement = intent.measurement;
-    const parts = [
-      categoryLabel,
-      materialLabel,
-      measurement
-        ? this.measurementLabel(
-            measurement.dimension,
-            measurement.maxDimensionCm,
-            locale,
-          )
+    const intent: SearchIntent = {
+      text: (candidate?.cleanQuery ?? query).trim(),
+      terms: candidate
+        ? [...new Set(candidate.terms.map(normalizeSearchText).filter(Boolean))]
+        : searchTerms(query),
+      productTerms: candidate
+        ? [
+            ...new Set(
+              candidate.productTerms.map(normalizeSearchText).filter(Boolean),
+            ),
+          ]
         : undefined,
-    ].filter((part): part is string => Boolean(part));
-
+      categoryCode: selected.categoryCode ?? candidate?.categoryCode,
+      material: candidate?.material
+        ? {
+            label: candidate.material.label,
+            aliases: candidate.material.aliases.map(normalizeSearchText),
+          }
+        : undefined,
+      measurements: [
+        ...(candidate?.measurements ?? []).filter(
+          (measurement) => measurement.dimension !== selected.dimension,
+        ),
+        ...(selectedIntent.measurements ?? []),
+      ],
+      condition: selected.condition ?? candidate?.condition,
+      price: candidate?.price
+        ? this.convertPrice(candidate.price, market)
+        : undefined,
+    };
+    const category = categories.find(
+      (item) => item.code === intent.categoryCode,
+    );
     return {
-      summary: parts.length ? parts.join(' · ') : query.trim(),
-      source: candidate ? 'ai' : 'deterministic',
-      ...(intent.categoryCode && categoryLabel
-        ? {
-            category: {
-              code: intent.categoryCode,
-              label: categoryLabel,
-            },
-          }
-        : {}),
-      ...(intent.material && materialLabel
-        ? {
-            material: {
-              code: intent.material.code,
-              label: materialLabel,
-            },
-          }
-        : {}),
-      ...(measurement ? { measurement: { ...measurement } } : {}),
+      intent,
+      interpretation: {
+        summary: candidate?.cleanQuery ?? '',
+        source: candidate ? 'ai' : 'deterministic',
+        ...(category
+          ? { category: { code: category.code, label: category.label } }
+          : {}),
+        ...(intent.material
+          ? { material: { label: intent.material.label } }
+          : {}),
+        ...(intent.measurements?.length
+          ? { measurements: intent.measurements }
+          : {}),
+        ...(intent.price ? { price: intent.price } : {}),
+      },
     };
   }
 
-  private categoryLabel(intent: SearchIntent): string | undefined {
-    if (!intent.categoryCode) return undefined;
-    return this.capitalize(
-      intent.categoryLabel || intent.aliases[0] || intent.categoryCode,
-    );
-  }
-
-  private materialLabel(
-    material: MaterialSearchIntent | undefined,
-    candidate: SearchIntentCandidate | undefined,
-  ): string | undefined {
-    if (!material) return undefined;
-    const candidateMaterial = candidate?.material
-      ? resolveMaterialSearchIntent(candidate.material)
-      : undefined;
-    const sameMaterial =
-      candidateMaterial !== undefined &&
-      ((candidateMaterial.code !== undefined &&
-        candidateMaterial.code === material.code) ||
-        candidateMaterial.aliases.some((alias) =>
-          material.aliases.includes(alias),
-        ));
-    const label = sameMaterial ? candidate?.material : material.aliases[0];
-    return label ? this.capitalize(label) : undefined;
-  }
-
-  private measurementLabel(
-    dimension: ProductDimension,
-    maxDimensionCm: number,
-    locale: string,
-  ): string {
-    const isSpanish = locale.toLowerCase().startsWith('es');
-    const labels = isSpanish
-      ? {
-          [ProductDimension.WIDTH]: 'ancho',
-          [ProductDimension.HEIGHT]: 'alto',
-          [ProductDimension.DEPTH]: 'profundidad',
-        }
-      : {
-          [ProductDimension.WIDTH]: 'width',
-          [ProductDimension.HEIGHT]: 'height',
-          [ProductDimension.DEPTH]: 'depth',
-        };
-    return isSpanish
-      ? `Máximo ${maxDimensionCm} cm de ${labels[dimension]}`
-      : `Maximum ${maxDimensionCm} cm ${labels[dimension]}`;
-  }
-
-  private capitalize(value: string): string {
-    return value.charAt(0).toUpperCase() + value.slice(1);
+  private convertPrice(
+    price: ProductPriceFilter,
+    market: Market,
+  ): ProductPriceFilter {
+    if (price.currencyCode === market.currencyCode) return price;
+    const rate = market.exchangeRates?.[price.currencyCode]?.rate;
+    if (typeof rate !== 'number' || !Number.isFinite(rate) || rate <= 0) {
+      throw new BadRequestException(
+        createErrorPayload(
+          ERROR_CODES.SEARCH_PRICE_CURRENCY_MISMATCH,
+          'Use a supported currency for the selected market',
+        ),
+      );
+    }
+    const convert = (
+      bound: ProductPriceBound | undefined,
+      minimum: boolean,
+    ): ProductPriceBound | undefined => {
+      if (!bound) return undefined;
+      const scaled =
+        BigInt(Math.round(bound.amount * 100)) *
+        BigInt(Math.round(rate * 1_000_000));
+      const floor = scaled / 1_000_000n;
+      const ceil = floor + (scaled % 1_000_000n ? 1n : 0n);
+      // Round toward valid stored cent values without weakening strict comparisons.
+      const cents = minimum === bound.inclusive ? ceil : floor;
+      const amount = Number(cents) / 100;
+      if (amount > 99_999_999.99) {
+        throw new BadRequestException(
+          createErrorPayload(
+            ERROR_CODES.SEARCH_PRICE_INVALID,
+            'Converted price exceeds the supported range',
+          ),
+        );
+      }
+      return { amount, inclusive: bound.inclusive };
+    };
+    return {
+      currencyCode: market.currencyCode,
+      ...(price.minimum ? { minimum: convert(price.minimum, true) } : {}),
+      ...(price.maximum ? { maximum: convert(price.maximum, false) } : {}),
+    };
   }
 }

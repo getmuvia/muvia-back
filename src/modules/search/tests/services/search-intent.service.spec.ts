@@ -1,108 +1,227 @@
+import { BadRequestException } from '@nestjs/common';
 import { ProductDimension } from '../../../../common/search/product-measurement';
 import { CategoryTaxonomyService } from '../../../categories/category-taxonomy.service';
-import type { SearchIntentProvider } from '../../interfaces/search-intent-provider.interface';
-import type { SearchIntent } from '../../interfaces/search-intent.interface';
+import { Market } from '../../../markets/entities/market.entity';
+import { ProductCondition } from '../../../products/enums/product-condition.enum';
+import type {
+  SearchIntentProvider,
+  SearchIntentCandidate,
+} from '../../interfaces/search-intent-provider.interface';
 import { SearchIntentService } from '../../services/search-intent.service';
 
-const baseIntent: SearchIntent = {
-  text: 'mueble de 100 cm',
-  terms: ['mueble', '100', 'cm'],
-  aliases: [],
-  aliasCategoryCodes: { escritorio: 'DESK' },
-  relatedCategoryCodes: [],
-  articles: ['', 'un ', 'una ', 'el ', 'la '],
-  identityPrefixes: ['utilizarse como'],
-};
-
-const deskIntent: SearchIntent = {
-  ...baseIntent,
-  text: 'escritorio',
-  terms: ['escritorio'],
+const categories = [
+  { code: 'DESK', label: 'Escritorio', aliases: ['escritorio', 'desk'] },
+];
+const market = {
+  code: 'BO',
+  currencyCode: 'BOB',
+  exchangeRates: { USD: { rate: 10, updatedAt: '2026-10-18' } },
+} as unknown as Market;
+const candidate: SearchIntentCandidate = {
+  cleanQuery: 'escritorio de madera',
+  terms: ['escritorio', 'madera'],
+  productTerms: ['escritorio', 'desk'],
   categoryCode: 'DESK',
-  aliases: ['escritorio', 'escritorios'],
+  material: { label: 'Madera', aliases: ['madera', 'wood'] },
+  measurements: [
+    {
+      dimension: ProductDimension.WIDTH,
+      maximum: { valueCm: 180, inclusive: true },
+    },
+  ],
+  price: { currencyCode: 'USD', maximum: { amount: 500, inclusive: true } },
 };
+function setup(value: SearchIntentCandidate = candidate) {
+  const interpret = jest.fn().mockResolvedValue(value);
+  const isAvailable = jest.fn(() => true);
+  const provider = {
+    isAvailable,
+    interpret,
+  } as unknown as SearchIntentProvider;
+  const taxonomy = {
+    getSearchCategories: jest.fn().mockResolvedValue(categories),
+  } as unknown as CategoryTaxonomyService;
+  return {
+    service: new SearchIntentService(taxonomy, provider),
+    provider,
+    interpret,
+    isAvailable,
+  };
+}
 
 describe('SearchIntentService', () => {
-  it('enriches deterministic intent with a validated AI interpretation', async () => {
-    const taxonomy = {
-      createSearchIntent: jest.fn((query: string) =>
-        Promise.resolve(query === 'escritorio' ? deskIntent : baseIntent),
-      ),
-    } as unknown as CategoryTaxonomyService;
-    const provider = {
-      isAvailable: jest.fn().mockReturnValue(true),
-      interpret: jest.fn().mockResolvedValue({
-        category: 'escritorio',
-        material: 'madera',
-        measurement: {
-          dimension: ProductDimension.WIDTH,
-          maxDimensionCm: 100,
-        },
-      }),
-    } as unknown as SearchIntentProvider;
-
-    const result = await new SearchIntentService(taxonomy, provider).resolve(
-      'mueble de 100 cm',
-      'es-BO',
-    );
-
+  it('passes the complete original query and market vocabulary in one interpretation call', async () => {
+    const { service, interpret } = setup();
+    const query =
+      'quiero un escritorio de madera de hasta 180 cm de ancho que no pase de 500 dÃ³lares';
+    const result = await service.resolve(query, 'es-BO', market);
+    expect(interpret).toHaveBeenCalledTimes(1);
+    expect(interpret).toHaveBeenCalledWith({
+      query,
+      locale: 'es-BO',
+      marketCode: 'BO',
+      currencyCode: 'BOB',
+      supportedCurrencies: ['BOB', 'USD'],
+      categories,
+      selected: {},
+    });
     expect(result.intent).toMatchObject({
-      categoryCode: 'DESK',
-      measurement: {
-        dimension: ProductDimension.WIDTH,
-        maxDimensionCm: 100,
+      text: 'escritorio de madera',
+      terms: ['escritorio', 'madera'],
+      measurements: candidate.measurements,
+      price: {
+        currencyCode: 'BOB',
+        maximum: { amount: 5000, inclusive: true },
       },
-      material: { code: 'WOOD' },
     });
-    expect(result.interpretation).toMatchObject({
-      source: 'ai',
-      summary: 'Escritorio · Madera · Máximo 100 cm de ancho',
-      category: { code: 'DESK', label: 'Escritorio' },
-    });
+    expect(result.interpretation.source).toBe('ai');
   });
 
-  it('keeps deterministic search available when the provider fails', async () => {
-    const deterministicIntent: SearchIntent = {
-      ...deskIntent,
-      text: 'escritorio',
+  it('keeps local budgets unchanged and preserves exclusive comparisons', async () => {
+    const price = {
+      currencyCode: 'BOB',
+      maximum: { amount: 2000, inclusive: false },
     };
-    const taxonomy = {
-      createSearchIntent: jest.fn().mockResolvedValue(deterministicIntent),
-    } as unknown as CategoryTaxonomyService;
-    const provider = {
-      isAvailable: jest.fn().mockReturnValue(true),
-      interpret: jest.fn().mockRejectedValue(new Error('timeout')),
-    } as unknown as SearchIntentProvider;
-
-    const result = await new SearchIntentService(taxonomy, provider).resolve(
-      'escritorio',
-      'es-BO',
-    );
-
-    expect(result.intent).toBe(deterministicIntent);
-    expect(result.interpretation.source).toBe('deterministic');
-    expect(result.interpretation.summary).toBe('Escritorio');
+    const { service } = setup({ ...candidate, price });
+    expect(
+      (await service.resolve('escritorio menor a 2000', 'es-BO', market)).intent
+        .price,
+    ).toEqual(price);
   });
 
-  it('preserves an AI material that is not in a static material family', async () => {
-    const taxonomy = {
-      createSearchIntent: jest.fn().mockResolvedValue(baseIntent),
-    } as unknown as CategoryTaxonomyService;
-    const provider = {
-      isAvailable: jest.fn().mockReturnValue(true),
-      interpret: jest.fn().mockResolvedValue({ material: 'melamina' }),
-    } as unknown as SearchIntentProvider;
+  it.each([
+    [true, true, 3.34],
+    [true, false, 3.33],
+    [false, true, 3.33],
+    [false, false, 3.34],
+  ])(
+    'preserves cent boundaries after conversion (minimum=%s, inclusive=%s)',
+    async (minimum, inclusive, amount) => {
+      const bound = { amount: 1, inclusive };
+      const { service } = setup({
+        ...candidate,
+        price: {
+          currencyCode: 'USD',
+          ...(minimum ? { minimum: bound } : { maximum: bound }),
+        },
+      });
+      const result = await service.resolve('presupuesto', 'es-BO', {
+        ...market,
+        exchangeRates: { USD: { rate: 3.333333, updatedAt: 'today' } },
+      });
+      expect(
+        minimum ? result.intent.price?.minimum : result.intent.price?.maximum,
+      ).toEqual({ amount, inclusive });
+    },
+  );
 
-    const result = await new SearchIntentService(taxonomy, provider).resolve(
-      'mueble de melamina',
-      'es-BO',
+  it('uses the selected market currency when converting in another country', async () => {
+    const { service } = setup();
+    const peru = {
+      ...market,
+      code: 'PE',
+      currencyCode: 'PEN',
+      exchangeRates: { USD: { rate: 4, updatedAt: 'today' } },
+    };
+    expect(
+      (await service.resolve('escritorio hasta 500 dÃ³lares', 'es-PE', peru))
+        .intent.price?.maximum?.amount,
+    ).toBe(2000);
+  });
+
+  it('rejects an explicit unsupported currency instead of silently treating it as local', async () => {
+    const { service } = setup({
+      ...candidate,
+      price: {
+        currencyCode: 'CNY',
+        maximum: { amount: 5000, inclusive: false },
+      },
+    });
+    await expect(
+      service.resolve('escritorio menor a 5000 yuanes', 'es-BO', market),
+    ).rejects.toBeInstanceOf(BadRequestException);
+  });
+
+  it('continues keyword retrieval when Gemini times out, preserving selected controls', async () => {
+    const { service, interpret } = setup();
+    interpret.mockRejectedValue(new Error('timeout'));
+    const result = await service.resolve('escritorio madera', 'es-BO', market, {
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      dimension: ProductDimension.WIDTH,
+      maxDimensionCm: 100,
+    });
+    expect(result.intent).toMatchObject({
+      terms: ['escritorio', 'madera'],
+      categoryCode: 'DESK',
+      condition: 'USED',
+      measurements: [
+        { dimension: 'width', maximum: { valueCm: 100, inclusive: true } },
+      ],
+    });
+    expect(result.intent.price).toBeUndefined();
+    expect(result.interpretation.source).toBe('deterministic');
+  });
+
+  it('continues keyword retrieval when interpretation is disabled', async () => {
+    const { service, isAvailable, interpret } = setup();
+    isAvailable.mockReturnValue(false);
+    expect(
+      (await service.resolve('silla madera', 'es-BO', market)).interpretation
+        .source,
+    ).toBe('deterministic');
+    expect(interpret).not.toHaveBeenCalled();
+  });
+
+  it('supplies selected context and overrides only the selected dimension', async () => {
+    const depth = {
+      dimension: ProductDimension.DEPTH,
+      maximum: { valueCm: 80, inclusive: false },
+    };
+    const { service, interpret } = setup({
+      ...candidate,
+      cleanQuery: 'Escritorio cómodo',
+      measurements: [...candidate.measurements!, depth],
+    });
+    const result = await service.resolve('cómodo', 'es-BO', market, {
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      dimension: ProductDimension.WIDTH,
+      maxDimensionCm: 100,
+    });
+    const selected = {
+      categoryCode: 'DESK',
+      condition: ProductCondition.USED,
+      measurements: [
+        { dimension: 'width', maximum: { valueCm: 100, inclusive: true } },
+      ],
+    };
+    expect(interpret).toHaveBeenCalledWith(
+      expect.objectContaining({ selected }),
     );
+    expect(result.intent).toMatchObject({
+      text: 'Escritorio cómodo',
+      condition: 'USED',
+      categoryCode: 'DESK',
+    });
+    expect(result.intent.measurements).toEqual([
+      depth,
+      ...selected.measurements,
+    ]);
+  });
 
-    expect(result.intent.material).toEqual({ aliases: ['melamina'] });
-    expect(result.interpretation).toMatchObject({
-      source: 'ai',
-      summary: 'Melamina',
-      material: { label: 'Melamina' },
+  it('converts a reused interpretation with current rates without mutating its original currency', async () => {
+    const { service } = setup();
+    const first = await service.resolve('escritorio', 'es-BO', market);
+    const second = await service.resolve('escritorio', 'es-BO', {
+      ...market,
+      exchangeRates: { USD: { rate: 12, updatedAt: 'later' } },
+    });
+    expect(first.intent.price?.maximum?.amount).toBe(5000);
+    expect(second.intent.price?.maximum?.amount).toBe(6000);
+    expect(candidate.price).toEqual({
+      currencyCode: 'USD',
+      maximum: { amount: 500, inclusive: true },
     });
   });
 });

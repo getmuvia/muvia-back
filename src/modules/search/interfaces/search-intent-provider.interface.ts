@@ -1,20 +1,21 @@
-import { ProductDimension } from '../../../common/search/product-measurement';
+import type { SearchCategory } from '../../categories/category-taxonomy.service';
+import type { SearchIntent } from './search-intent.interface';
 
 export interface SearchIntentProviderInput {
   query: string;
   locale: string;
+  marketCode: string;
+  currencyCode: string;
+  supportedCurrencies: string[];
+  categories: SearchCategory[];
+  selected: Pick<SearchIntent, 'categoryCode' | 'condition' | 'measurements'>;
 }
 
-export interface SearchIntentCandidate {
-  category?: string;
-  material?: string;
-  measurement?: {
-    dimension: ProductDimension;
-    maxDimensionCm: number;
-  };
+export interface SearchIntentCandidate extends Omit<SearchIntent, 'text'> {
+  cleanQuery: string;
+  productTerms: string[];
 }
 
-/** Port implemented by the model used to interpret natural-language searches. */
 export interface SearchIntentProvider {
   isAvailable(): boolean;
   interpret(input: SearchIntentProviderInput): Promise<SearchIntentCandidate>;

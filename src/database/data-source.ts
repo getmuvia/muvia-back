@@ -1,3 +1,4 @@
+import { AddMarketExchangeRates1792281600000 } from './migrations/1792281600000-add-market-exchange-rates';
 import 'reflect-metadata';
 import { DataSource } from 'typeorm';
 import { Category } from '../modules/categories/entities/category.entity';
@@ -61,6 +62,7 @@ export default new DataSource({
     AddProductSearchText1790726401000,
     AddProductCondition1791676800000,
     AddVendorRepairs1791763200000,
+    AddMarketExchangeRates1792281600000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,

@@ -33,13 +33,14 @@ import { FileUploadPurpose } from '../files/file-upload-policy';
 import {
   ProductDimension,
   VALID_PRODUCT_DIMENSION_PATTERN,
-  parseProductMeasurementSearch,
   productDimensionCmSql,
 } from '../../common/search/product-measurement';
 import {
   createErrorPayload,
   ERROR_CODES,
 } from '../../common/errors/error-code';
+
+type CatalogSearchFilters = Partial<ProductFilterDto>;
 
 @Injectable()
 export class ProductsService {
@@ -105,9 +106,9 @@ export class ProductsService {
       marketCode = 'BO',
       ...requestedFilters
     } = filterDto;
-    const filters = this.resolveMeasurementSearch(requestedFilters);
-    const skip = (page - 1) * limit;
     await this.marketsService.requireActive(marketCode);
+    const filters: CatalogSearchFilters = requestedFilters;
+    const skip = (page - 1) * limit;
 
     const queryBuilder = this.createCatalogQuery(marketCode);
     this.applyFilters(queryBuilder, filters);
@@ -535,7 +536,7 @@ export class ProductsService {
 
   private applyFilters(
     queryBuilder: SelectQueryBuilder<Product>,
-    filters: Partial<ProductFilterDto>,
+    filters: CatalogSearchFilters,
   ): void {
     if (filters.condition !== undefined) {
       queryBuilder.andWhere('product.condition = :condition', {
@@ -606,27 +607,6 @@ export class ProductsService {
         maxDimensionCm,
       },
     );
-  }
-
-  private resolveMeasurementSearch(
-    filters: Partial<ProductFilterDto>,
-  ): Partial<ProductFilterDto> {
-    if (
-      !filters.search ||
-      (filters.dimension && filters.maxDimensionCm !== undefined)
-    ) {
-      return filters;
-    }
-
-    const parsedSearch = parseProductMeasurementSearch(filters.search);
-    if (!parsedSearch.measurement) return filters;
-
-    return {
-      ...filters,
-      search: parsedSearch.query || undefined,
-      dimension: parsedSearch.measurement.dimension,
-      maxDimensionCm: parsedSearch.measurement.maxDimensionCm,
-    };
   }
 
   private async validateSelectableCategory(

@@ -1,3 +1,4 @@
+import { SearchQuery } from '../search-query';
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
 import { pgcrypto } from '@electric-sql/pglite/contrib/pgcrypto';
@@ -73,11 +74,6 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
   ): SearchIntent => ({
     text: terms.join(' '),
     terms,
-    aliases: [],
-    aliasCategoryCodes: {},
-    relatedCategoryCodes: [],
-    articles: [],
-    identityPrefixes: [],
     ...extra,
   });
 
@@ -88,6 +84,9 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       keywords?: string[];
       material?: string;
       width?: number;
+      depth?: number;
+      height?: number;
+      unit?: string;
       active?: boolean;
       market?: string;
       price?: number;
@@ -106,7 +105,12 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
         extra.keywords ?? [],
         {
           material: extra.material,
-          dimensions: { width: extra.width ?? 100, unit: 'cm' },
+          dimensions: {
+            width: extra.width ?? 100,
+            depth: extra.depth ?? 60,
+            height: extra.height ?? 75,
+            unit: extra.unit ?? 'cm',
+          },
         },
       ],
     );
@@ -183,6 +187,24 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     if (db) await db.close();
   });
 
+  it('persists independent currency rates and preserves other keys when an admin updates one', async () => {
+    const markets = new MarketsService(source.getRepository(Market));
+    expect((await markets.requireActive('BO')).exchangeRates.USD.rate).toBe(
+      11.69,
+    );
+    await markets.updateExchangeRate('BO', { currencyCode: 'EUR', rate: 12 });
+    await markets.updateExchangeRate('BO', { currencyCode: 'USD', rate: 10 });
+    const refreshed = await markets.requireActive('BO');
+    expect(refreshed.exchangeRates.USD.rate).toBe(10);
+    expect(refreshed.exchangeRates.EUR.rate).toBe(12);
+    await expect(
+      markets.updateExchangeRate('BO', { currencyCode: 'BOB', rate: 2 }),
+    ).rejects.toThrow();
+    await expect(
+      markets.updateExchangeRate('ZZ', { currencyCode: 'USD', rate: 2 }),
+    ).rejects.toThrow();
+  });
+
   it('backfills existing products with accents, case and punctuation normalized', () => {
     expect(backfilled).toEqual({
       search_title: ' sillon nino ',
@@ -190,6 +212,175 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       search_keywords: ' ergonomico azul marino ',
       search_material: ' madera ',
     });
+  });
+
+  it('enforces listing budgets before lexical/vector limits and catalog pagination', async () => {
+    const below = await seed('Escritorio madera', { price: 1599.99 });
+    const boundary = await seed('Escritorio madera', { price: 2000 });
+    const above = await seed('Escritorio madera', { price: 3999 });
+    const price = {
+      currencyCode: 'BOB',
+      maximum: { amount: 2000, inclusive: false },
+    };
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio'], { price }),
+            scope: { limit: 1, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { price }),
+            scope: { limit: 5, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+
+    const vector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    for (const id of [above, boundary, below]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'price-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, vector, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'price-test',
+    } as unknown as ConfigService);
+    expect(
+      (
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 1, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { price: price },
+        })
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    const inclusive = {
+      currencyCode: 'BOB',
+      maximum: { amount: 2000, inclusive: true },
+    };
+    expect(
+      (
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 10, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { price: inclusive },
+        })
+      )
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual([below, boundary].sort());
+
+    const catalogPage = await catalog.findAll({
+      search: 'escritorio',
+      maxPrice: 1999.99,
+      limit: 1,
+    });
+    expect(catalogPage.data.map((product) => product.id)).toEqual([below]);
+    expect(catalogPage).toMatchObject({
+      total: 1,
+      totalPages: 1,
+    });
+    const range = { minPrice: 1000, maxPrice: 2000, limit: 1 };
+    const first = await catalog.findAll({ ...range, page: 1 });
+    const second = await catalog.findAll({ ...range, page: 2 });
+    expect(first).toMatchObject({ total: 2, totalPages: 2 });
+    expect(
+      new Set([...first.data, ...second.data].map((product) => product.id)),
+    ).toEqual(new Set([below, boundary]));
+
+    await db.query('UPDATE products SET condition = $2 WHERE id = $1', [
+      below,
+      ProductCondition.USED,
+    ]);
+    const measured = { dimension: ProductDimension.WIDTH, maxDimensionCm: 100 };
+    expect(
+      (
+        await vectors.findBySimilarity({
+          embedding: vector,
+          scope: { limit: 1, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: {
+            measurements: [
+              {
+                dimension: measured.dimension,
+                maximum: { valueCm: measured.maxDimensionCm, inclusive: true },
+              },
+            ],
+            condition: ProductCondition.USED,
+            price: inclusive,
+          },
+        })
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: {
+              ...intent(['escritorio'], {
+                price: inclusive,
+                measurements: [
+                  {
+                    dimension: measured.dimension,
+                    maximum: {
+                      valueCm: measured.maxDimensionCm,
+                      inclusive: true,
+                    },
+                  },
+                ],
+              }),
+              condition: ProductCondition.USED,
+            },
+            scope: { limit: 1, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
+    ).toEqual([below]);
+    const combined = await catalog.findAll({
+      search: 'escritorio',
+      maxPrice: 2000,
+      ...measured,
+      condition: ProductCondition.USED,
+    });
+    expect(combined.data.map((product) => product.id)).toEqual([below]);
+  });
+
+  it('combines a selected category and a validated budget', async () => {
+    const category = await source
+      .getRepository(Category)
+      .save({ name: 'Budget desks', code: 'PRICE_DESK', isSelectable: true });
+    const affordable = await seed('Escritorio', { price: 799 });
+    const expensive = await seed('Escritorio', { price: 2000 });
+    await seed('Escritorio without the selected category', { price: 500 });
+    await db.query(
+      'UPDATE products SET category_id = $1 WHERE id = ANY($2::uuid[])',
+      [category.id, [affordable, expensive]],
+    );
+    const response = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: {
+          ...intent(['escritorio'], {
+            price: {
+              currencyCode: 'BOB',
+              maximum: { amount: 1000, inclusive: true },
+            },
+          }),
+          categoryCode: category.code,
+        },
+        scope: { limit: 10, marketCode: 'BO' },
+      }),
+    );
+    expect(response.map((product) => product.id)).toEqual([affordable]);
   });
 
   it('migrates existing products to NEW and enforces valid, non-null conditions', async () => {
@@ -238,10 +429,22 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ).toEqual(new Set([used, wideUsed]));
     expect((await catalog.findAll({})).total).toBe(3);
     expect(
-      await lexical.search(intent(['silla']), 1, 'BO', ProductCondition.USED),
+      await lexical.search(
+        SearchQuery.fromIntent({
+          intent: { ...intent(['silla']), condition: ProductCondition.USED },
+          scope: { limit: 1, marketCode: 'BO' },
+        }),
+      ),
     ).toHaveLength(1);
     expect(
-      (await lexical.search(intent(['silla']), 5, 'BO', ProductCondition.USED))
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: { ...intent(['silla']), condition: ProductCondition.USED },
+            scope: { limit: 5, marketCode: 'BO' },
+          }),
+        )
+      )
         .map((product) => product.id)
         .sort(),
     ).toEqual([used, wideUsed].sort());
@@ -267,27 +470,28 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     const vectorRepository = new ProductVectorRepository(products, {
       getOrThrow: () => 'condition-test',
     } as unknown as ConfigService);
-    const limited = await vectorRepository.findBySimilarity(
-      queryVector,
-      1,
-      0.1,
-      'BO',
-      undefined,
-      ProductCondition.USED,
-    );
+    const limited = await vectorRepository.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.1,
+      filters: { condition: ProductCondition.USED },
+    });
     expect(limited).toHaveLength(1);
     expect([used, wideUsed]).toContain(limited[0].id);
-    const measured = await vectorRepository.findBySimilarity(
-      queryVector,
-      5,
-      0.1,
-      'BO',
-      {
-        dimension: ProductDimension.WIDTH,
-        maxDimensionCm: 70,
+    const measured = await vectorRepository.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 5, marketCode: 'BO' },
+      threshold: 0.1,
+      filters: {
+        measurements: [
+          {
+            dimension: ProductDimension.WIDTH,
+            maximum: { valueCm: 70, inclusive: true },
+          },
+        ],
+        condition: ProductCondition.USED,
       },
-      ProductCondition.USED,
-    );
+    });
     expect(measured.map((product) => product.id)).toEqual([used]);
   });
 
@@ -359,9 +563,23 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       [id],
     );
     expect(
-      (await lexical.search(intent(['sillon']), 10, 'BO')).map((p) => p.id),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['sillon']),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([id]);
-    expect(await lexical.search(intent(['oficina']), 10, 'BO')).toEqual([]);
+    expect(
+      await lexical.search(
+        SearchQuery.fromIntent({
+          intent: intent(['oficina']),
+          scope: { limit: 10, marketCode: 'BO' },
+        }),
+      ),
+    ).toEqual([]);
     const rows = await db.query<SearchColumns>(
       'SELECT search_description, search_keywords, search_material FROM products WHERE id = $1',
       [id],
@@ -442,7 +660,7 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect((await catalog.findAll({ search: '---' })).total).toBe(0);
   });
 
-  it('preserves lexical prefixes, complete words, weighted aliases and a stable limit with joined assets', async () => {
+  it('preserves lexical prefixes, relevance and a stable limit with joined assets', async () => {
     const title = await seed('Silla cómoda');
     const keyword = await seed('Asiento', { keywords: ['silla'] });
     const description = await seed('Asiento', {
@@ -454,18 +672,24 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
       `INSERT INTO product_assets (product_id, url) VALUES ($1, 'a.webp'), ($1, 'b.webp')`,
       [title],
     );
-    const prefix = await lexical.search(intent(['sil']), 10, 'BO');
+    const prefix = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent(['sil']),
+        scope: { limit: 10, marketCode: 'BO' },
+      }),
+    );
     expect(new Set(prefix.map((p) => p.id))).toEqual(
       new Set([title, keyword, description, plural]),
     );
     const aliases = await lexical.search(
-      intent(['oficina'], { aliases: ['silla'], categoryCode: 'chairs' }),
-      2,
-      'BO',
+      SearchQuery.fromIntent({
+        intent: intent(['silla']),
+        scope: { limit: 2, marketCode: 'BO' },
+      }),
     );
-    expect(aliases.map((p) => p.id)).toEqual([title, keyword]);
+    expect(aliases.map((p) => p.id)).toEqual([title, plural]);
     expect(aliases[0].assets).toHaveLength(2);
-    expect(aliases[0].price).toBe(400);
+    expect(Number(aliases[0].listings[0].price)).toBe(400);
     expect(aliases[0].searchTitle).toBeUndefined();
   });
 
@@ -549,20 +773,207 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
        VALUES ('PE', 'Peru', 'PEN', 'es-PE', 'SOUTH_AMERICA', ARRAY['es-PE'], 'PE')`,
     );
     await seed('Mesa', { material: 'Madera', width: 80, market: 'PE' });
-    const measurement = {
-      dimension: ProductDimension.WIDTH,
-      maxDimensionCm: 90,
-    };
+    const measurements = [
+      {
+        dimension: ProductDimension.WIDTH,
+        maximum: { valueCm: 90, inclusive: true },
+      },
+    ];
     expect(
-      (await lexical.search(intent(['madera'], { measurement }), 10, 'BO')).map(
-        (p) => p.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['madera'], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([small]);
     expect(
-      (await lexical.search(intent([], { measurement }), 10, 'BO')).map(
-        (p) => p.id,
-      ),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([small]);
+  });
+
+  it('requires a product term and ranks attribute coverage before the lexical limit', async () => {
+    await seed('Mesa azul cómoda');
+    await seed('Silla azul');
+    const best = await seed('Asiento de oficina', {
+      keywords: ['azul', 'cómoda'],
+    });
+    const response = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent(['azul', 'cómoda'], {
+          productTerms: ['silla', 'asiento'],
+        }),
+        scope: { limit: 1, marketCode: 'BO' },
+      }),
+    );
+    expect(response.map((product) => product.id)).toEqual([best]);
+  });
+
+  it('does not retrieve the entire market for semantic-only or empty criteria', async () => {
+    await seed('Silla');
+    await seed('Mesa');
+    for (const text of ['', 'un lugar cómodo para leer']) {
+      const search = SearchQuery.fromIntent({
+        scope: { marketCode: 'BO', limit: 10 },
+        intent: { text, terms: [] },
+      });
+      expect(await lexical.search(search)).toEqual([]);
+    }
+  });
+
+  it('uses material aliases before lexical and vector limits', async () => {
+    const metal = await seed('Escritorio', { material: 'Metal' });
+    const wood = await seed('Modelo de oficina', {
+      keywords: ['escritorio'],
+      material: 'MADERÁ',
+    });
+    const material = { label: 'Wood', aliases: ['wood', 'madera'] };
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio'], { material }),
+            scope: { limit: 1, marketCode: 'BO' },
+          }),
+        )
+      ).map((product) => product.id),
+    ).toEqual([wood]);
+
+    const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    const woodVector = JSON.stringify([
+      0.8,
+      0.2,
+      ...Array<number>(766).fill(0),
+    ]);
+    for (const [id, embedding] of [
+      [metal, queryVector],
+      [wood, woodVector],
+    ]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'material-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, embedding, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'material-test',
+    } as unknown as ConfigService);
+    const response = await vectors.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.3,
+      filters: { measurements: [], materialAliases: material.aliases },
+    });
+    expect(response.map((product) => product.id)).toEqual([wood]);
+  });
+
+  it('applies all measurement bounds in centimeters before both retrieval limits', async () => {
+    const valid = await seed('Mesa cm', {
+      width: 160,
+      depth: 75,
+      height: 76.2,
+    });
+    const metric = await seed('Mesa m', {
+      width: 1.6,
+      depth: 0.75,
+      height: 0.762,
+      unit: 'm',
+    });
+    const inches = await seed('Mesa in', {
+      width: 60,
+      depth: 30,
+      height: 30,
+      unit: 'in',
+    });
+    const boundary = await seed('Mesa al límite', {
+      width: 180,
+      depth: 75,
+      height: 76.2,
+    });
+    const narrow = await seed('Mesa estrecha', {
+      width: 149,
+      depth: 75,
+      height: 76.2,
+    });
+    const deep = await seed('Mesa profunda', {
+      width: 160,
+      depth: 81,
+      height: 76.2,
+    });
+    const tall = await seed('Mesa alta', { width: 160, depth: 75, height: 77 });
+    const measurements = [
+      {
+        dimension: ProductDimension.WIDTH,
+        minimum: { valueCm: 150, inclusive: true },
+        maximum: { valueCm: 180, inclusive: false },
+      },
+      {
+        dimension: ProductDimension.DEPTH,
+        maximum: { valueCm: 80, inclusive: true },
+      },
+      {
+        dimension: ProductDimension.HEIGHT,
+        minimum: { valueCm: 76.2, inclusive: true },
+        maximum: { valueCm: 76.2, inclusive: true },
+      },
+    ];
+    const expected = [valid, metric, inches].sort();
+    expect(
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent([], { measurements }),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      )
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual(expected);
+    const queryVector = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    for (const id of [...expected, boundary, narrow, deep, tall]) {
+      await db.query(
+        `UPDATE products SET embedding = $2::vector, embedding_model = 'measurement-test', embedding_revision = search_revision, embedding_content_version = $3 WHERE id = $1`,
+        [id, queryVector, PRODUCT_EMBEDDING_CONTENT_VERSION],
+      );
+    }
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'measurement-test',
+    } as unknown as ConfigService);
+    expect(
+      (
+        await vectors.findBySimilarity({
+          embedding: queryVector,
+          scope: { limit: 10, marketCode: 'BO' },
+          threshold: 0.3,
+          filters: { measurements: measurements },
+        })
+      )
+        .map((product) => product.id)
+        .sort(),
+    ).toEqual(expected);
+    const [literal] = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent([], { measurements }),
+        scope: { limit: 1, marketCode: 'BO' },
+      }),
+    );
+    const [semantic] = await vectors.findBySimilarity({
+      embedding: queryVector,
+      scope: { limit: 1, marketCode: 'BO' },
+      threshold: 0.3,
+      filters: { measurements: measurements },
+    });
+    expect(expected).toContain(literal.id);
+    expect(expected).toContain(semantic.id);
   });
 
   it('uses GIN indexes for selective substring and word searches without disabling sequential scans', async () => {
@@ -611,7 +1022,14 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     ).toHaveLength(0);
     await migration.up(runner);
     expect(
-      (await lexical.search(intent(['escritorio']), 10, 'BO')).map((p) => p.id),
+      (
+        await lexical.search(
+          SearchQuery.fromIntent({
+            intent: intent(['escritorio']),
+            scope: { limit: 10, marketCode: 'BO' },
+          }),
+        )
+      ).map((p) => p.id),
     ).toEqual([id]);
   });
 });
