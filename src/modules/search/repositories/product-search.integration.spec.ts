@@ -383,6 +383,49 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect(response.map((product) => product.id)).toEqual([affordable]);
   });
 
+  it('retrieves the stored category for semantic and lexical search, including uncategorized products', async () => {
+    const category = await source.getRepository(Category).save({
+      name: 'Search desks',
+      code: 'SEARCH_CATEGORY_DESK',
+    });
+    const categorized = await seed('Search desk');
+    const uncategorized = await seed('Search desk without category');
+    await products.update(categorized, { categoryId: category.id });
+    const embedding = JSON.stringify([1, ...Array<number>(767).fill(0)]);
+    await db.query(
+      `UPDATE products SET embedding = $1::vector, embedding_model = 'category-test',
+       embedding_revision = search_revision, embedding_content_version = $2`,
+      [embedding, PRODUCT_EMBEDDING_CONTENT_VERSION],
+    );
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'category-test',
+    } as unknown as ConfigService);
+    const scope = { limit: 10, marketCode: 'BO' };
+    const semantic = await vectors.findBySimilarity({
+      embedding,
+      scope,
+      threshold: 0.3,
+    });
+    const literal = await lexical.search(
+      SearchQuery.fromIntent({ intent: intent(['desk']), scope }),
+    );
+    const expected = {
+      id: category.id,
+      code: category.code,
+      name: category.name,
+    };
+    expect(semantic).toHaveLength(2);
+    expect(literal).toHaveLength(2);
+    for (const results of [semantic, literal]) {
+      expect(
+        results.find((item) => item.id === categorized)?.category,
+      ).toMatchObject(expected);
+      expect(
+        results.find((item) => item.id === uncategorized)?.category,
+      ).toBeNull();
+    }
+  });
+
   it('migrates existing products to NEW and enforces valid, non-null conditions', async () => {
     const conditionMigration = new AddProductCondition1791676800000();
     await conditionMigration.down(runner);

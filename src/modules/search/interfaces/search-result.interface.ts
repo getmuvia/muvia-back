@@ -1,3 +1,9 @@
+export interface SearchProductCategory {
+  id: string;
+  code: string;
+  name: string;
+}
+
 export interface SearchProductResult {
   id: string;
   title: string;
@@ -8,6 +14,7 @@ export interface SearchProductResult {
   sellerId: string;
   categoryId: string | null;
   categoryCode: string | null;
+  category: SearchProductCategory | null;
   specifications: { material?: string } | null;
   currencyCode: string;
   imageUrl: string | null;
@@ -26,6 +33,7 @@ export interface HybridProductResult {
   description: string | null;
   price: number;
   currencyCode: string;
+  category: SearchProductCategory | null;
   imageUrl: string | null;
   score: number;
   matchType: 'semantic' | 'lexical' | 'hybrid';

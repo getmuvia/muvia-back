@@ -90,6 +90,9 @@ export class ProductVectorRepository {
         p.seller_id as "sellerId",
         p.category_id as "categoryId",
         category.code as "categoryCode",
+        CASE WHEN category.id IS NOT NULL THEN
+          json_build_object('id', category.id, 'code', category.code, 'name', category.name)
+        ELSE NULL END as category,
         p."createdAt",
         1 - (p.embedding <=> $1::vector) as similarity,
         (
