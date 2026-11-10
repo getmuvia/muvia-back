@@ -22,6 +22,7 @@ export interface StorageProvider {
     sourceKey: string,
     destinationKey: string,
     generation: string,
+    contentType: string,
   ): Promise<void>;
   delete(key: string): Promise<void>;
   getPublicUrl(key: string): string;

@@ -29,7 +29,7 @@ describe('FilesService', () => {
   let service: FilesService;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     storage.createUploadPolicy.mockImplementation((requestedKey: string) =>
       Promise.resolve({
         url: 'https://upload.example',
@@ -81,7 +81,65 @@ describe('FilesService', () => {
       key,
       url: publicUrl,
     });
-    expect(storage.promote).toHaveBeenCalledWith(pendingKey, key, '7');
+    expect(storage.promote).toHaveBeenCalledWith(
+      pendingKey,
+      key,
+      '7',
+      'image/jpeg',
+    );
+    expect(storage.getMetadata).toHaveBeenCalledWith(key);
+    expect(storage.getHeader).toHaveBeenCalledWith(key, '7');
+  });
+
+  it.each([null, '', 'image/png'])(
+    'rejects a final copy with missing or mismatched content type (%s)',
+    async (contentType) => {
+      const pendingKey = `pending/product_image/${ownerId}/089d9a4e-68c2-4ac7-a1c1-d4c907471537.jpg`;
+      storage.getMetadata
+        .mockResolvedValueOnce({
+          size: 1024,
+          contentType: 'image/jpeg',
+          generation: '7',
+        })
+        .mockResolvedValueOnce(
+          contentType === null
+            ? null
+            : {
+                size: 1024,
+                contentType,
+                generation: '8',
+              },
+        );
+
+      await expect(service.finalizeUpload(ownerId, pendingKey)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(storage.getMetadata).toHaveBeenCalledWith(key);
+    },
+  );
+
+  it('verifies the bytes of the final copy before returning its URL', async () => {
+    const pendingKey = `pending/product_image/${ownerId}/089d9a4e-68c2-4ac7-a1c1-d4c907471537.jpg`;
+    storage.getHeader
+      .mockResolvedValueOnce(Buffer.from([0xff, 0xd8, 0xff]))
+      .mockResolvedValueOnce(Buffer.from('<html>'));
+
+    await expect(service.finalizeUpload(ownerId, pendingKey)).rejects.toThrow(
+      BadRequestException,
+    );
+    expect(storage.getHeader).toHaveBeenCalledWith(key, '7');
+  });
+
+  it('verifies an existing final copy when concurrent promotion returns 412', async () => {
+    const pendingKey = `pending/product_image/${ownerId}/089d9a4e-68c2-4ac7-a1c1-d4c907471537.jpg`;
+    storage.promote.mockRejectedValueOnce({ code: 412 });
+
+    await expect(service.finalizeUpload(ownerId, pendingKey)).resolves.toEqual({
+      key,
+      url: publicUrl,
+    });
+    expect(storage.getMetadata).toHaveBeenCalledWith(key);
+    expect(storage.getHeader).toHaveBeenCalledWith(key, '7');
   });
 
   it('returns an already finalized object when the response is retried', async () => {
