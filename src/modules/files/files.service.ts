@@ -98,11 +98,12 @@ export class FilesService {
         pendingKey,
         finalKey,
         metadata.generation,
+        policy.contentType,
       );
     } catch (error) {
       if ((error as { code?: number }).code !== 412) throw error;
-      await this.requireVerifiedObject(finalKey, policy);
     }
+    await this.requireVerifiedObject(finalKey, policy);
     return { key: finalKey, url: this.storageProvider.getPublicUrl(finalKey) };
   }
 

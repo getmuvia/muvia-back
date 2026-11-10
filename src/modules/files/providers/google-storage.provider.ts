@@ -67,9 +67,11 @@ export class GoogleCloudStorageProvider implements StorageProvider {
     sourceKey: string,
     destinationKey: string,
     generation: string,
+    contentType: string,
   ): Promise<void> {
     const source = this.bucket.file(sourceKey, { generation });
     await source.copy(this.bucket.file(destinationKey), {
+      contentType,
       contentDisposition: 'inline',
       preconditionOpts: { ifGenerationMatch: 0 },
     });
