@@ -39,6 +39,10 @@ import {
   createErrorPayload,
   ERROR_CODES,
 } from '../../common/errors/error-code';
+import {
+  resolveProductAvailability,
+  type ProductAvailability,
+} from './product-availability';
 
 type CatalogSearchFilters = Partial<ProductFilterDto>;
 
@@ -56,6 +60,7 @@ export class ProductsService {
 
   async create(sellerId: string, dto: CreateProductDto): Promise<Product> {
     const { assets, ...productData } = dto;
+    const availability = resolveProductAvailability(dto);
     await this.verifyProductAssets(sellerId, assets ?? []);
 
     const savedProduct = await this.productRepository.manager.transaction(
@@ -71,6 +76,7 @@ export class ProductsService {
 
         const product = productRepository.create({
           ...productData,
+          ...availability,
           sellerId,
         });
         const saved = await productRepository.save(product);
@@ -119,6 +125,11 @@ export class ProductsService {
       .addSelect('product.title', 'title')
       .addSelect('listing.price', 'price')
       .addSelect('listing.currencyCode', 'currencyCode')
+      .addSelect('listing.stock', 'stock')
+      .addSelect('product.availabilityMode', 'availabilityMode')
+      .addSelect('product.leadTimeMinDays', 'leadTimeMinDays')
+      .addSelect('product.leadTimeMaxDays', 'leadTimeMaxDays')
+      .addSelect('product.acceptsCustomDimensions', 'acceptsCustomDimensions')
       .addSelect('category.id', 'categoryId')
       .addSelect('category.name', 'categoryName')
       .orderBy('product.createdAt', 'DESC')
@@ -127,14 +138,17 @@ export class ProductsService {
       .limit(limit);
 
     const [rows, total] = await Promise.all([
-      queryBuilder.getRawMany<{
-        id: string;
-        title: string;
-        price: string;
-        currencyCode: string;
-        categoryId: string | null;
-        categoryName: string | null;
-      }>(),
+      queryBuilder.getRawMany<
+        ProductAvailability & {
+          id: string;
+          title: string;
+          price: string;
+          currencyCode: string;
+          stock: number;
+          categoryId: string | null;
+          categoryName: string | null;
+        }
+      >(),
       countQuery.getCount(),
     ]);
     // Fetch one image per product in the page, without multiplying catalog rows.
@@ -163,6 +177,8 @@ export class ProductsService {
       title: row.title,
       price: Number(row.price),
       currencyCode: row.currencyCode,
+      stock: row.stock,
+      ...resolveProductAvailability(row),
       category: row.categoryId
         ? { id: row.categoryId, name: row.categoryName! }
         : null,
@@ -244,7 +260,8 @@ export class ProductsService {
           categoryRepository,
         );
 
-        Object.assign(product, productData);
+        const availability = resolveProductAvailability(dto, product);
+        Object.assign(product, productData, availability);
         if (condition !== undefined) product.condition = condition;
         await productRepository.save(product);
 

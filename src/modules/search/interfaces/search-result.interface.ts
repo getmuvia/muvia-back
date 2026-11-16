@@ -1,10 +1,12 @@
+import type { ProductAvailability } from '../../products/product-availability';
+
 export interface SearchProductCategory {
   id: string;
   code: string;
   name: string;
 }
 
-export interface SearchProductResult {
+export interface SearchProductResult extends Partial<ProductAvailability> {
   id: string;
   title: string;
   description: string | null;
@@ -33,6 +35,11 @@ export interface HybridProductResult {
   description: string | null;
   price: number;
   currencyCode: string;
+  stock: number;
+  availabilityMode: ProductAvailability['availabilityMode'];
+  leadTimeMinDays: number | null;
+  leadTimeMaxDays: number | null;
+  acceptsCustomDimensions: boolean;
   category: SearchProductCategory | null;
   imageUrl: string | null;
   score: number;

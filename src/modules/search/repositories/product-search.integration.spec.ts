@@ -13,6 +13,8 @@ import configuredSource from '../../../database/data-source';
 import { AddProductSearchText1790726401000 } from '../../../database/migrations/1790726401000-add-product-search-text';
 import { AddProductCondition1791676800000 } from '../../../database/migrations/1791676800000-add-product-condition';
 import { ProductCondition } from '../../products/enums/product-condition.enum';
+import { ProductAvailabilityMode } from '../../products/enums/product-availability.enum';
+import { SearchRankingService } from '../services/search-ranking.service';
 import { ProductVectorRepository } from './product-vector.repository';
 import { ConfigService } from '@nestjs/config';
 import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../../ai/constants/ai.constants';
@@ -758,6 +760,11 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
         price: 725,
         currencyCode: 'BOB',
         category: { id: category.id, name: 'Catalog desks' },
+        stock: 3,
+        availabilityMode: ProductAvailabilityMode.IN_STOCK,
+        leadTimeMinDays: null,
+        leadTimeMaxDays: null,
+        acceptsCustomDimensions: false,
         primaryImage: {
           url: 'https://example.com/cover.webp',
           alt: 'Desk cover',
@@ -769,6 +776,110 @@ describe('Persisted product search against PostgreSQL + pg_trgm', () => {
     expect(detail.assets).toHaveLength(3);
     expect(detail.specifications).toBeDefined();
     expect(detail.sellerId).toBe(sellerId);
+  });
+
+  it('persists seller availability through creation, editing, catalog, detail and search', async () => {
+    await db.query(
+      'UPDATE vendor_locations SET is_primary = true WHERE id = $1',
+      [locationId],
+    );
+    const editor = new ProductsService(
+      products,
+      source.getRepository(ProductAsset),
+      {
+        recordChange: () => Promise.resolve(null),
+        dispatch: () => Promise.resolve(undefined),
+      } as unknown as EmbeddingService,
+      new MarketsService(source.getRepository(Market)),
+      {
+        verifyAssetReference: () => Promise.resolve(undefined),
+      } as unknown as FilesService,
+    );
+    const settings = {
+      availabilityMode: ProductAvailabilityMode.MADE_TO_ORDER,
+      leadTimeMinDays: 10,
+      leadTimeMaxDays: 15,
+      acceptsCustomDimensions: true,
+    };
+    const created = await editor.create(sellerId, {
+      title: 'Availability desk',
+      condition: ProductCondition.NEW,
+      price: 900,
+      stock: 0,
+      ...settings,
+    });
+    expect(await editor.findOne(created.id)).toMatchObject(settings);
+    expect((await editor.findBySeller(sellerId))[0]).toMatchObject(settings);
+    const page = await editor.findAll({ marketCode: 'BO' });
+    expect(page.data[0]).toMatchObject({ ...settings, stock: 0, price: 900 });
+    const matches = await lexical.search(
+      SearchQuery.fromIntent({
+        intent: intent(['availability']),
+        scope: { marketCode: 'BO', limit: 10 },
+      }),
+    );
+    const ranked = new SearchRankingService().rank(
+      [],
+      matches,
+      intent(['availability']),
+    );
+    expect(ranked.results[0]).toMatchObject({ ...settings, stock: 0 });
+    const vector = JSON.stringify(
+      Array.from({ length: 768 }, (_, index) => (index === 0 ? 1 : 0)),
+    );
+    await db.query(
+      'UPDATE products SET embedding = $2::vector, embedding_model = $3, embedding_content_version = $4, embedding_revision = search_revision WHERE id = $1',
+      [
+        created.id,
+        vector,
+        'availability-test',
+        PRODUCT_EMBEDDING_CONTENT_VERSION,
+      ],
+    );
+    const vectors = new ProductVectorRepository(products, {
+      getOrThrow: () => 'availability-test',
+    } as unknown as ConfigService);
+    const semantic = await vectors.findBySimilarity({
+      embedding: vector,
+      scope: { marketCode: 'BO', limit: 10 },
+      threshold: 0.3,
+    });
+    expect(semantic[0]).toMatchObject({ ...settings, stock: 0 });
+    expect(
+      new SearchRankingService().rank(semantic, [], intent(['availability']))
+        .results[0],
+    ).toMatchObject({ ...settings, stock: 0 });
+    await editor.update(created.id, sellerId, { price: 950 });
+    expect(await editor.findOne(created.id)).toMatchObject({
+      ...settings,
+      price: '950.00',
+    });
+    await expect(
+      editor.update(created.id, sellerId, { leadTimeMinDays: 30 }),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      editor.update(created.id, randomUUID(), {
+        acceptsCustomDimensions: false,
+      }),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(await editor.findOne(created.id)).toMatchObject(settings);
+    await editor.update(created.id, sellerId, {
+      availabilityMode: ProductAvailabilityMode.IN_STOCK,
+      acceptsCustomDimensions: false,
+    });
+    expect((await editor.findAll({ marketCode: 'BO' })).data[0]).toMatchObject({
+      availabilityMode: ProductAvailabilityMode.IN_STOCK,
+      stock: 0,
+      leadTimeMinDays: null,
+      leadTimeMaxDays: null,
+      acceptsCustomDimensions: false,
+    });
+    await expect(
+      db.query('UPDATE products SET availability_mode = $1 WHERE id = $2', [
+        'MADE_TO_ORDER',
+        created.id,
+      ]),
+    ).rejects.toThrow();
   });
 
   it('paginates products independently of asset counts and falls back to a non-primary image', async () => {

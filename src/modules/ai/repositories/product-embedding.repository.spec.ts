@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { randomUUID } from 'node:crypto';
 import { EntityManager, QueryRunner, Repository } from 'typeorm';
 import { AddDurableEmbeddingJobs1790726400000 } from '../../../database/migrations/1790726400000-add-durable-embedding-jobs';
+import { AddProductAvailability1794873600000 } from '../../../database/migrations/1794873600000-add-product-availability';
 import { Product } from '../../products/entities/product.entity';
 import { ProductVectorRepository } from '../../search/repositories/product-vector.repository';
 import { PRODUCT_EMBEDDING_CONTENT_VERSION } from '../constants/ai.constants';
@@ -96,6 +97,9 @@ describe('Durable embeddings against PostgreSQL + pgvector', () => {
       );
     `);
     await migration.up({
+      query: (sql: string) => db.exec(sql),
+    } as unknown as QueryRunner);
+    await new AddProductAvailability1794873600000().up({
       query: (sql: string) => db.exec(sql),
     } as unknown as QueryRunner);
     manager = executor(db);

@@ -12,6 +12,7 @@ import type {
   SearchProductResult,
 } from '../interfaces/search-result.interface';
 import { SEARCH } from '../search.constants';
+import { resolveProductAvailability } from '../../products/product-availability';
 
 @Injectable()
 export class SearchRankingService {
@@ -39,6 +40,8 @@ export class SearchRankingService {
           description: product.description,
           price: Number(product.price),
           currencyCode: product.currencyCode,
+          stock: product.stock,
+          ...resolveProductAvailability(product),
           category: product.category,
           imageUrl: product.imageUrl,
           score: product.similarity,
@@ -77,6 +80,8 @@ export class SearchRankingService {
           title: product.title,
           description: product.description,
           price: Number(listing?.price ?? product.price),
+          stock: listing?.stock ?? product.stock,
+          ...resolveProductAvailability(product),
           currencyCode:
             listing?.currencyCode ?? intent.price?.currencyCode ?? '',
           category: product.category

@@ -22,6 +22,7 @@ import { AddDurableEmbeddingJobs1790726400000 } from './migrations/1790726400000
 import { AddProductSearchText1790726401000 } from './migrations/1790726401000-add-product-search-text';
 import { AddProductCondition1791676800000 } from './migrations/1791676800000-add-product-condition';
 import { AddVendorRepairs1791763200000 } from './migrations/1791763200000-add-vendor-repairs';
+import { AddProductAvailability1794873600000 } from './migrations/1794873600000-add-product-availability';
 
 const host = process.env.DB_HOST;
 const usesCloudSqlSocket = host?.startsWith('/');
@@ -63,6 +64,7 @@ export default new DataSource({
     AddProductCondition1791676800000,
     AddVendorRepairs1791763200000,
     AddMarketExchangeRates1792281600000,
+    AddProductAvailability1794873600000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,

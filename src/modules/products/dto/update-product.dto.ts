@@ -1,4 +1,4 @@
-import { PartialType, OmitType } from '@nestjs/mapped-types';
+import { IntersectionType, PartialType, OmitType } from '@nestjs/mapped-types';
 import {
   IsArray,
   IsEnum,
@@ -10,9 +10,20 @@ import { Type } from 'class-transformer';
 import { CreateProductDto } from './create-product.dto';
 import { SyncProductAssetDto } from './sync-product-asset.dto';
 import { ProductCondition } from '../enums/product-condition.enum';
+import { ProductAvailabilityDto } from './product-availability.dto';
 
-export class UpdateProductDto extends PartialType(
-  OmitType(CreateProductDto, ['assets', 'condition'] as const),
+export class UpdateProductDto extends IntersectionType(
+  PartialType(
+    OmitType(CreateProductDto, [
+      'assets',
+      'condition',
+      'availabilityMode',
+      'leadTimeMinDays',
+      'leadTimeMaxDays',
+      'acceptsCustomDimensions',
+    ] as const),
+  ),
+  ProductAvailabilityDto,
 ) {
   // Creation defaults must not reset an existing condition during PATCH.
   @ValidateIf((_dto, value: unknown) => value !== undefined)
