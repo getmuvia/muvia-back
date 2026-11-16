@@ -5,6 +5,7 @@ import {
   IsOptional,
   IsUUID,
   IsNumber,
+  IsInt,
   IsPositive,
   IsArray,
   IsObject,
@@ -14,8 +15,9 @@ import {
 import { Type } from 'class-transformer';
 import { CreateProductAssetDto } from './create-product-asset.dto';
 import { ProductCondition } from '../enums/product-condition.enum';
+import { ProductAvailabilityDto } from './product-availability.dto';
 
-export class CreateProductDto {
+export class CreateProductDto extends ProductAvailabilityDto {
   @IsEnum(ProductCondition, {
     message: 'Product condition must be NEW or USED',
   })
@@ -33,7 +35,7 @@ export class CreateProductDto {
   @IsPositive({ message: 'Price must be a positive number' })
   price: number;
 
-  @IsNumber()
+  @IsInt()
   @Min(0, { message: 'Stock cannot be negative' })
   @IsOptional()
   stock?: number;

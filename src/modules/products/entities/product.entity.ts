@@ -7,6 +7,7 @@ import {
   OneToMany,
   JoinColumn,
   Index,
+  Check,
 } from 'typeorm';
 import { User } from '../../users/entities/user.entity';
 import { Category } from '../../categories/entities/category.entity';
@@ -14,6 +15,7 @@ import { ProductAsset } from './product-asset.entity';
 import { ProductListing } from './product-listing.entity';
 import { ProductCondition } from '../enums/product-condition.enum';
 import { normalizedSearchSql } from '../../../common/search/search-text';
+import { ProductAvailabilityMode } from '../enums/product-availability.enum';
 
 export interface ProductSpecifications {
   weight?: string;
@@ -29,6 +31,15 @@ export interface ProductSpecifications {
 }
 
 @Entity('products')
+@Check(
+  'CHK_product_availability',
+  `
+  (availability_mode = 'IN_STOCK' AND lead_time_min_days IS NULL AND lead_time_max_days IS NULL)
+  OR (availability_mode = 'MADE_TO_ORDER'
+    AND lead_time_min_days IS NOT NULL AND lead_time_max_days IS NOT NULL
+    AND lead_time_min_days > 0 AND lead_time_max_days >= lead_time_min_days)
+`,
+)
 @Index('IDX_products_search_title_trgm', { synchronize: false })
 @Index('IDX_products_search_description_trgm', { synchronize: false })
 @Index('IDX_products_search_keywords_trgm', { synchronize: false })
@@ -65,6 +76,23 @@ export class Product {
 
   @Column({ default: 0 })
   stock: number;
+
+  @Column({
+    name: 'availability_mode',
+    type: 'varchar',
+    length: 20,
+    default: ProductAvailabilityMode.IN_STOCK,
+  })
+  availabilityMode: ProductAvailabilityMode;
+
+  @Column({ name: 'lead_time_min_days', type: 'integer', nullable: true })
+  leadTimeMinDays: number | null;
+
+  @Column({ name: 'lead_time_max_days', type: 'integer', nullable: true })
+  leadTimeMaxDays: number | null;
+
+  @Column({ name: 'accepts_custom_dimensions', default: false })
+  acceptsCustomDimensions: boolean;
 
   @Column({ type: 'jsonb', nullable: true })
   specifications: ProductSpecifications;
