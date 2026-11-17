@@ -18,6 +18,7 @@ import { MarketsModule } from './modules/markets/markets.module';
 import { CorrelationIdMiddleware } from './common/middleware/correlation-id.middleware';
 import { TelemetryModule } from './modules/telemetry/telemetry.module';
 import { SearchModule } from './modules/search/search.module';
+import { QuotationsModule } from './modules/quotations/quotations.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { SearchModule } from './modules/search/search.module';
     AuthModule,
     UsersModule,
     ProductsModule,
+    QuotationsModule,
     CategoriesModule,
     FilesModule,
     AiModule,

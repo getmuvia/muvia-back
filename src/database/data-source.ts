@@ -23,6 +23,8 @@ import { AddProductSearchText1790726401000 } from './migrations/1790726401000-ad
 import { AddProductCondition1791676800000 } from './migrations/1791676800000-add-product-condition';
 import { AddVendorRepairs1791763200000 } from './migrations/1791763200000-add-vendor-repairs';
 import { AddProductAvailability1794873600000 } from './migrations/1794873600000-add-product-availability';
+import { Quotation } from '../modules/quotations/entities/quotation.entity';
+import { AddProductQuotations1794956400000 } from './migrations/1794956400000-add-product-quotations';
 
 const host = process.env.DB_HOST;
 const usesCloudSqlSocket = host?.startsWith('/');
@@ -52,6 +54,7 @@ export default new DataSource({
     ProductAsset,
     ProductListing,
     ProductEmbeddingJob,
+    Quotation,
   ],
   migrations: [
     InitialSchema1787070000000,
@@ -65,6 +68,7 @@ export default new DataSource({
     AddVendorRepairs1791763200000,
     AddMarketExchangeRates1792281600000,
     AddProductAvailability1794873600000,
+    AddProductQuotations1794956400000,
   ],
   migrationsTableName: 'typeorm_migrations',
   synchronize: false,
